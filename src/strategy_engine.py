@@ -9,18 +9,26 @@ def final_decision(
         if score >= 50:
             return "ACCUMULATE"
 
-        else:
-            return "WAIT"
+        return "WAIT"
 
 
 
     elif regime == "BULL":
 
-        if score >= 80 and rsi < 70:
+        # خروج از اشباع شدید
+        if rsi > 90:
+            return "SELL"
+
+
+        # ورود در روند مثبت
+        if score >= 70 and rsi < 80:
             return "BUY"
 
+
+        # خرید مرحله‌ای
         elif score >= 60:
             return "ACCUMULATE"
+
 
         else:
             return "HOLD"
@@ -30,13 +38,22 @@ def final_decision(
     elif regime == "BEAR":
 
         if score < 40:
-            return "REDUCE"
+            return "WAIT"
+
+        elif rsi > 70:
+            return "SELL"
 
         else:
-            return "WAIT"
+            return "HOLD"
 
 
 
     else:
+
+        if rsi > 90:
+            return "SELL"
+
+        elif score >= 65:
+            return "ACCUMULATE"
 
         return "HOLD"

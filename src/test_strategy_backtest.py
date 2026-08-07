@@ -1,49 +1,75 @@
-from src.backtest.strategy_backtest import run_strategy_backtest
+from src.backtest.backtest_loader import BacktestLoader
 
 
 prices = [
     60000,
     59000,
     58000,
-    61000,
-    64000,
-    65000,
-    67000,
+    57000,
+    56000,
+    55000,
+    54000,
+    53000,
+    52000,
+    51000,
+    50000,
+    51000,
+    52000,
+    54000,
+    56000,
+    58000,
+    60000,
+    63000,
     66000,
-    68000,
-    69000,
     70000,
-    71000,
-    72000,
-    73000,
     74000,
-    75000,
-    76000,
-    77000,
     78000,
-    79000,
-    80000,
-    81000,
-    82000
+    82000,
+    85000,
+    88000
 ]
 
 
-result = run_strategy_backtest(
+engine = BacktestLoader()
+
+
+report = engine.run(
     prices,
     200
 )
 
 
-print("================")
-print("STRATEGY BACKTEST")
-print("================")
+print("========================")
+print("CryptoPilot Backtest")
+print("========================")
 
 print(
-    "Final Value:",
-    result["final_value"]
+    "Initial Capital :",
+    report["initial_capital"],
+    "$"
 )
 
 print(
-    "Trades:",
-    result["trades"]
+    "Final Capital   :",
+    report["final_capital"],
+    "$"
 )
+
+print(
+    "Profit          :",
+    report["profit"],
+    "$"
+)
+
+print(
+    "Return          :",
+    report["return_percent"],
+    "%"
+)
+
+print(
+    "Trades          :",
+    report["trades"]
+)
+
+print("========================")

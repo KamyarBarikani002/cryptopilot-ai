@@ -1,4 +1,4 @@
-from src.backtest_engine import simulate_dca
+from src.backtest.strategy_backtest import run_strategy_backtest
 
 
 class BacktestLoader:
@@ -6,12 +6,49 @@ class BacktestLoader:
     def run(
         self,
         prices,
-        monthly_amount,
-        start_capital
+        initial_capital
     ):
 
-        return simulate_dca(
+        result = run_strategy_backtest(
             prices,
-            monthly_amount,
-            start_capital
+            initial_capital
         )
+
+
+        profit = (
+            result["final_value"]
+            - initial_capital
+        )
+
+
+        roi = (
+            profit
+            / initial_capital
+        ) * 100
+
+
+        return {
+
+            "initial_capital": round(
+                initial_capital,
+                2
+            ),
+
+            "final_capital": round(
+                result["final_value"],
+                2
+            ),
+
+            "profit": round(
+                profit,
+                2
+            ),
+
+            "return_percent": round(
+                roi,
+                2
+            ),
+
+            "trades": result["trades"]
+
+        }
