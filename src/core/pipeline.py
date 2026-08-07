@@ -6,6 +6,7 @@ from src.scoring.scoring_loader import ScoringLoader
 from src.strategy.strategy_loader import StrategyLoader
 from src.risk.risk_loader import RiskLoader
 from src.portfolio.portfolio_loader import PortfolioLoader
+from src.report.report_loader import ReportLoader
 
 
 class CryptoPilotPipeline:
@@ -20,6 +21,7 @@ class CryptoPilotPipeline:
         self.strategy = StrategyLoader()
         self.risk = RiskLoader()
         self.portfolio = PortfolioLoader()
+        self.report = ReportLoader()
 
         print("Pipeline initialized")
 
@@ -64,15 +66,13 @@ class CryptoPilotPipeline:
         )
 
 
-        print("-----------------------")
-        print("CryptoPilot AI Decision")
-        print("-----------------------")
-        print("BTC Price:", price)
-        print("MA20:", analysis["ma"])
-        print("RSI:", analysis["rsi"])
-        print("Regime:", regime)
-        print("Score:", scoring["score"])
-        print("Decision:", decision)
+        self.report.generate(
+            price,
+            analysis["ma"],
+            analysis["rsi"],
+            scoring["score"],
+            decision
+        )
 
 
         print("-----------------------")
