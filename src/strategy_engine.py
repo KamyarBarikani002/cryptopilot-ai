@@ -6,11 +6,12 @@ def final_decision(
 
     if regime == "ACCUMULATION_ZONE":
 
-        if score >= 50 and rsi < 60:
+        if score >= 50:
             return "ACCUMULATE"
 
         else:
             return "WAIT"
+
 
 
     elif regime == "BULL":
@@ -19,7 +20,11 @@ def final_decision(
             return "BUY"
 
         elif score >= 60:
+            return "ACCUMULATE"
+
+        else:
             return "HOLD"
+
 
 
     elif regime == "BEAR":
@@ -29,6 +34,7 @@ def final_decision(
 
         else:
             return "WAIT"
+
 
 
     else:
