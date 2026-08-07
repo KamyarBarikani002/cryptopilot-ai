@@ -2,6 +2,8 @@ from src.data.data_loader import MarketDataLoader
 from src.data.candle_loader import CandleLoader
 from src.analysis.analysis_loader import AnalysisLoader
 from src.regime.regime_loader import RegimeLoader
+from src.scoring.scoring_loader import ScoringLoader
+from src.strategy.strategy_loader import StrategyLoader
 
 
 class CryptoPilotPipeline:
@@ -12,6 +14,8 @@ class CryptoPilotPipeline:
         self.candles = CandleLoader()
         self.analysis = AnalysisLoader()
         self.regime = RegimeLoader()
+        self.scoring = ScoringLoader()
+        self.strategy = StrategyLoader()
 
         print("Pipeline initialized")
 
@@ -23,25 +27,10 @@ class CryptoPilotPipeline:
         candles = self.candles.get_data()
 
 
-        print("-----------------------")
-        print("Market Data")
-        print("-----------------------")
-        print("BTC Price:", price)
-        print("Candles:", len(candles))
-
-
         analysis = self.analysis.analyze(
             candles,
             price
         )
-
-
-        print("-----------------------")
-        print("Technical Analysis")
-        print("-----------------------")
-        print("MA20:", analysis["ma"])
-        print("RSI:", analysis["rsi"])
-        print("Signal:", analysis["signal"])
 
 
         regime = self.regime.detect(
@@ -51,7 +40,25 @@ class CryptoPilotPipeline:
         )
 
 
+        scoring = self.scoring.calculate(
+            price,
+            analysis["ma"],
+            analysis["rsi"]
+        )
+
+
+        decision = self.strategy.decide(
+            regime,
+            scoring["score"]
+        )
+
+
         print("-----------------------")
-        print("Market Regime")
+        print("CryptoPilot AI Decision")
         print("-----------------------")
-        print(regime)
+        print("BTC Price:", price)
+        print("MA20:", analysis["ma"])
+        print("RSI:", analysis["rsi"])
+        print("Regime:", regime)
+        print("Score:", scoring["score"])
+        print("Decision:", decision)
