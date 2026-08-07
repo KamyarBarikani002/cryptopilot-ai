@@ -53,7 +53,8 @@ class CryptoPilotPipeline:
 
         decision = self.strategy.decide(
             regime,
-            scoring["score"]
+            scoring["score"],
+            analysis["rsi"]
         )
 
         risk = self.risk.manage(
