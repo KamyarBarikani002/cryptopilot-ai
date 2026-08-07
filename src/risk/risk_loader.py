@@ -1,27 +1,16 @@
-from src.risk_manager import (
-    calculate_position_size,
-    calculate_stop_loss
-)
+from src.risk.risk_engine import calculate_risk
 
 
 class RiskLoader:
 
-    def manage(self, capital, risk, entry_price):
 
-        stop_percent = 3
+    def analyze(
+        self,
+        capital,
+        regime
+    ):
 
-        position_size = calculate_position_size(
+        return calculate_risk(
             capital,
-            risk,
-            stop_percent
+            regime
         )
-
-        stop_loss = calculate_stop_loss(
-            entry_price,
-            stop_percent
-        )
-
-        return {
-            "position_size": position_size,
-            "stop_loss": stop_loss
-        }
