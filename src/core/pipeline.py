@@ -5,6 +5,7 @@ from src.regime.regime_loader import RegimeLoader
 from src.scoring.scoring_loader import ScoringLoader
 from src.strategy.strategy_loader import StrategyLoader
 from src.risk.risk_loader import RiskLoader
+from src.portfolio.portfolio_loader import PortfolioLoader
 
 
 class CryptoPilotPipeline:
@@ -18,6 +19,7 @@ class CryptoPilotPipeline:
         self.scoring = ScoringLoader()
         self.strategy = StrategyLoader()
         self.risk = RiskLoader()
+        self.portfolio = PortfolioLoader()
 
         print("Pipeline initialized")
 
@@ -56,6 +58,11 @@ class CryptoPilotPipeline:
             price
         )
 
+        portfolio = self.portfolio.create(
+            200,
+            regime
+        )
+
 
         print("-----------------------")
         print("CryptoPilot AI Decision")
@@ -67,8 +74,17 @@ class CryptoPilotPipeline:
         print("Score:", scoring["score"])
         print("Decision:", decision)
 
+
         print("-----------------------")
         print("Risk Management")
         print("-----------------------")
         print("Position Size:", risk["position_size"])
         print("Stop Loss:", risk["stop_loss"])
+
+
+        print("-----------------------")
+        print("Portfolio Plan")
+        print("-----------------------")
+
+        for asset, amount in portfolio.items():
+            print(asset, ":", amount, "$")
