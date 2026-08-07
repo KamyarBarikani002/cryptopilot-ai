@@ -1,0 +1,14 @@
+PROJECT_NAME = "CryptoPilot AI"
+
+INITIAL_CAPITAL = 200
+MONTHLY_INVESTMENT = 100
+
+DEFAULT_SYMBOL = "BTCUSDT"
+DEFAULT_INTERVAL = "1h"
+
+RISK_PER_TRADE = 0.02
+
+DATABASE_PATH = "database/cryptopilot.db"
+
+REPORT_PATH = "reports/"
+LOG_PATH = "logs/"
