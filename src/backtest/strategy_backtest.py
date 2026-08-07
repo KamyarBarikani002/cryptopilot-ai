@@ -14,6 +14,10 @@ def run_strategy_backtest(
 
     trades = 0
 
+    trade_history = []
+
+    entry_price = 0
+
 
     for i in range(20, len(prices)):
 
@@ -61,7 +65,7 @@ def run_strategy_backtest(
         )
 
 
-        # خرید
+        # BUY
         if (
             decision in ["BUY", "ACCUMULATE"]
             and capital > 0
@@ -69,12 +73,23 @@ def run_strategy_backtest(
 
             btc = capital / price
 
+            entry_price = price
+
             capital = 0
 
             trades += 1
 
 
-        # فروش
+            trade_history.append(
+                {
+                    "type": "BUY",
+                    "price": price,
+                    "amount": btc
+                }
+            )
+
+
+        # SELL
         elif (
             decision == "SELL"
             and btc > 0
@@ -82,10 +97,27 @@ def run_strategy_backtest(
 
             capital = btc * price
 
+            profit = (
+                capital
+                - initial_capital
+            )
+
+
             btc = 0
 
             trades += 1
 
+
+            trade_history.append(
+                {
+                    "type": "SELL",
+                    "price": price,
+                    "profit": round(
+                        profit,
+                        2
+                    )
+                }
+            )
 
 
     final_value = (
@@ -98,6 +130,8 @@ def run_strategy_backtest(
 
         "final_value": final_value,
 
-        "trades": trades
+        "trades": trades,
+
+        "trade_history": trade_history
 
     }

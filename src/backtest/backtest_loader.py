@@ -49,6 +49,8 @@ class BacktestLoader:
                 2
             ),
 
-            "trades": result["trades"]
+            "trades": result["trades"],
+
+            "trade_history": result["trade_history"]
 
         }

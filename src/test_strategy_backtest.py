@@ -72,4 +72,43 @@ print(
     report["trades"]
 )
 
+
+print()
+print("========================")
+print("Trade History")
+print("========================")
+
+
+for trade in report["trade_history"]:
+
+    print()
+
+    print(
+        "Type:",
+        trade["type"]
+    )
+
+    print(
+        "Price:",
+        trade["price"]
+    )
+
+
+    if "amount" in trade:
+
+        print(
+            "BTC Amount:",
+            trade["amount"]
+        )
+
+
+    if "profit" in trade:
+
+        print(
+            "Profit:",
+            trade["profit"],
+            "$"
+        )
+
+
 print("========================")
