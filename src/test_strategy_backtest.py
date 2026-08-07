@@ -74,6 +74,7 @@ print(
 
 
 print()
+
 print("========================")
 print("Trade History")
 print("========================")
@@ -109,6 +110,56 @@ for trade in report["trade_history"]:
             trade["profit"],
             "$"
         )
+
+
+print()
+
+print("========================")
+print("Performance")
+print("========================")
+
+
+performance = report["performance"]
+
+
+print(
+    "Total Trades:",
+    performance["total_trades"]
+)
+
+print(
+    "Winning Trades:",
+    performance["winning_trades"]
+)
+
+print(
+    "Losing Trades:",
+    performance["losing_trades"]
+)
+
+print(
+    "Win Rate:",
+    performance["win_rate"],
+    "%"
+)
+
+print(
+    "Average Profit:",
+    performance["average_profit"],
+    "$"
+)
+
+print(
+    "Best Trade:",
+    performance["best_trade"],
+    "$"
+)
+
+print(
+    "Worst Trade:",
+    performance["worst_trade"],
+    "$"
+)
 
 
 print("========================")

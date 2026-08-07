@@ -1,4 +1,5 @@
 from src.backtest.strategy_backtest import run_strategy_backtest
+from src.performance.performance_loader import PerformanceLoader
 
 
 class BacktestLoader:
@@ -23,8 +24,14 @@ class BacktestLoader:
 
         roi = (
             profit
-            / initial_capital
+            /
+            initial_capital
         ) * 100
+
+
+        performance = PerformanceLoader().analyze(
+            result["trade_history"]
+        )
 
 
         return {
@@ -51,6 +58,8 @@ class BacktestLoader:
 
             "trades": result["trades"],
 
-            "trade_history": result["trade_history"]
+            "trade_history": result["trade_history"],
+
+            "performance": performance
 
         }
