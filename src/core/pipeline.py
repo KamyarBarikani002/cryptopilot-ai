@@ -7,6 +7,7 @@ from src.strategy.strategy_loader import StrategyLoader
 from src.risk.risk_loader import RiskLoader
 from src.portfolio.portfolio_loader import PortfolioLoader
 from src.report.report_loader import ReportLoader
+from src.journal.journal_loader import JournalLoader
 
 
 class CryptoPilotPipeline:
@@ -22,6 +23,7 @@ class CryptoPilotPipeline:
         self.risk = RiskLoader()
         self.portfolio = PortfolioLoader()
         self.report = ReportLoader()
+        self.journal = JournalLoader()
 
         print("Pipeline initialized")
 
@@ -75,6 +77,23 @@ class CryptoPilotPipeline:
         )
 
 
+        trade_data = {
+
+            "asset": "BTC",
+            "price": price,
+            "decision": decision,
+            "score": scoring["score"],
+            "position_size": risk["position_size"],
+            "stop_loss": risk["stop_loss"]
+
+        }
+
+
+        self.journal.save(
+            trade_data
+        )
+
+
         print("-----------------------")
         print("Risk Management")
         print("-----------------------")
@@ -88,3 +107,8 @@ class CryptoPilotPipeline:
 
         for asset, amount in portfolio.items():
             print(asset, ":", amount, "$")
+
+
+        print("-----------------------")
+        print("Trade Journal Saved")
+        print("-----------------------")

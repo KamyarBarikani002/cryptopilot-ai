@@ -5,5 +5,14 @@
         "decision": "ACCUMULATE",
         "amount": 50,
         "time": "2026-07-31 18:03:29.975243"
+    },
+    {
+        "asset": "BTC",
+        "price": 65053.76,
+        "decision": "HOLD",
+        "score": 60,
+        "position_size": 133.33333333333334,
+        "stop_loss": 63102.1472,
+        "time": "2026-08-07 15:12:35.401702"
     }
 ]
