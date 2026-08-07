@@ -161,5 +161,17 @@ print(
     "$"
 )
 
+print(
+    "Peak Equity:",
+    performance["peak_equity"],
+    "$"
+)
+
+print(
+    "Max Drawdown:",
+    performance["max_drawdown"],
+    "%"
+)
+
 
 print("========================")

@@ -30,7 +30,8 @@ class BacktestLoader:
 
 
         performance = PerformanceLoader().analyze(
-            result["trade_history"]
+            result["trade_history"],
+            result["equity_curve"]
         )
 
 

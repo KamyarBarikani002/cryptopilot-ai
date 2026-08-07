@@ -3,7 +3,8 @@ class PerformanceLoader:
 
     def analyze(
         self,
-        trade_history
+        trade_history,
+        equity_curve
     ):
 
         profits = []
@@ -38,7 +39,7 @@ class PerformanceLoader:
 
         win_rate = 0
 
-        if total_trades > 0:
+        if total_trades:
 
             win_rate = (
                 len(winning)
@@ -49,7 +50,7 @@ class PerformanceLoader:
 
         average_profit = 0
 
-        if total_trades > 0:
+        if total_trades:
 
             average_profit = (
                 sum(profits)
@@ -58,22 +59,29 @@ class PerformanceLoader:
             )
 
 
-        best_trade = 0
+        peak = 0
 
-        if profits:
-
-            best_trade = max(
-                profits
-            )
+        max_drawdown = 0
 
 
-        worst_trade = 0
+        for value in equity_curve:
 
-        if profits:
+            if value > peak:
 
-            worst_trade = min(
-                profits
-            )
+                peak = value
+
+
+            drawdown = (
+                (peak - value)
+                /
+                peak
+            ) * 100
+
+
+            if drawdown > max_drawdown:
+
+                max_drawdown = drawdown
+
 
 
         return {
@@ -95,12 +103,22 @@ class PerformanceLoader:
             ),
 
             "best_trade": round(
-                best_trade,
+                max(profits) if profits else 0,
                 2
             ),
 
             "worst_trade": round(
-                worst_trade,
+                min(profits) if profits else 0,
+                2
+            ),
+
+            "peak_equity": round(
+                peak,
+                2
+            ),
+
+            "max_drawdown": round(
+                max_drawdown,
                 2
             )
 
