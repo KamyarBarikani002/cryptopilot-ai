@@ -4,6 +4,7 @@ from src.analysis.analysis_loader import AnalysisLoader
 from src.regime.regime_loader import RegimeLoader
 from src.scoring.scoring_loader import ScoringLoader
 from src.strategy.strategy_loader import StrategyLoader
+from src.risk.risk_loader import RiskLoader
 
 
 class CryptoPilotPipeline:
@@ -16,6 +17,7 @@ class CryptoPilotPipeline:
         self.regime = RegimeLoader()
         self.scoring = ScoringLoader()
         self.strategy = StrategyLoader()
+        self.risk = RiskLoader()
 
         print("Pipeline initialized")
 
@@ -26,12 +28,10 @@ class CryptoPilotPipeline:
 
         candles = self.candles.get_data()
 
-
         analysis = self.analysis.analyze(
             candles,
             price
         )
-
 
         regime = self.regime.detect(
             price,
@@ -39,17 +39,21 @@ class CryptoPilotPipeline:
             analysis["rsi"]
         )
 
-
         scoring = self.scoring.calculate(
             price,
             analysis["ma"],
             analysis["rsi"]
         )
 
-
         decision = self.strategy.decide(
             regime,
             scoring["score"]
+        )
+
+        risk = self.risk.manage(
+            200,
+            2,
+            price
         )
 
 
@@ -62,3 +66,9 @@ class CryptoPilotPipeline:
         print("Regime:", regime)
         print("Score:", scoring["score"])
         print("Decision:", decision)
+
+        print("-----------------------")
+        print("Risk Management")
+        print("-----------------------")
+        print("Position Size:", risk["position_size"])
+        print("Stop Loss:", risk["stop_loss"])
