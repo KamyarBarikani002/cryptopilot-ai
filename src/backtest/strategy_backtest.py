@@ -2,6 +2,7 @@ from src.technical_analysis import calculate_ma, calculate_rsi
 from src.scoring_engine import calculate_score
 from src.market_regime import detect_market_regime
 from src.strategy_engine import final_decision
+from src.risk.risk_loader import RiskLoader
 
 
 def run_strategy_backtest(
@@ -10,6 +11,7 @@ def run_strategy_backtest(
 ):
 
     capital = initial_capital
+
     btc = 0
 
     trades = 0
@@ -17,6 +19,8 @@ def run_strategy_backtest(
     trade_history = []
 
     equity_curve = []
+
+    entry_value = 0
 
 
     for i in range(20, len(prices)):
@@ -51,6 +55,12 @@ def run_strategy_backtest(
         )
 
 
+        risk = RiskLoader().analyze(
+            capital,
+            regime
+        )
+
+
         print(
             "Price:",
             price,
@@ -65,14 +75,24 @@ def run_strategy_backtest(
         )
 
 
+        # BUY فقط وقتی پوزیشن نداریم
         if (
             decision in ["BUY", "ACCUMULATE"]
             and capital > 0
+            and btc == 0
         ):
 
-            btc = capital / price
+            position_size = min(
+                capital,
+                risk["position_size"]
+            )
 
-            capital = 0
+
+            btc = position_size / price
+
+            capital -= position_size
+
+            entry_value = position_size
 
             trades += 1
 
@@ -81,25 +101,34 @@ def run_strategy_backtest(
                 {
                     "type": "BUY",
                     "price": price,
-                    "amount": btc
+                    "amount": btc,
+                    "size": position_size
                 }
             )
 
 
+
+        # SELL
         elif (
             decision == "SELL"
             and btc > 0
         ):
 
-            capital = btc * price
+            sell_value = btc * price
+
 
             profit = (
-                capital
-                - initial_capital
+                sell_value
+                -
+                entry_value
             )
 
 
+            capital += sell_value
+
             btc = 0
+
+            entry_value = 0
 
             trades += 1
 
@@ -116,16 +145,12 @@ def run_strategy_backtest(
             )
 
 
-        current_value = (
+        equity_curve.append(
             capital
             +
             btc * price
         )
 
-
-        equity_curve.append(
-            current_value
-        )
 
 
     final_value = (
