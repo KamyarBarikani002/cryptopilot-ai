@@ -60,7 +60,8 @@ portfolio = create_dynamic_portfolio(
 
 decision = final_decision(
     regime,
-    score
+    score,
+    rsi
 )
 
 

@@ -15,8 +15,9 @@ class PortfolioLoader:
         return portfolio
 
 
-    def monthly_plan(self, capital):
+    def monthly_plan(self, capital, regime):
 
         return calculate_monthly_plan(
-            capital
+            capital,
+            regime
         )
