@@ -13,6 +13,8 @@ RUN mkdir -p database logs reports
 
 EXPOSE 8501
 
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
-
-ENTRYPOINT ["streamlit", "run", "dashboard.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+# شل‌فرم (نه exec-form) استفاده می‌شه تا ${PORT} که سرویس‌هایی مثل Railway تزریق
+# می‌کنن جایگزین بشه؛ اگر تعریف نشده باشه همون 8501 پیش‌فرض می‌مونه.
+# نکته: HEALTHCHECK قبلی با curl بود که توی ایمیج python:3.11-slim نصب نیست و
+# همیشه fail می‌شد، برای همین حذف شد؛ Railway خودش healthcheck جدا داره.
+CMD streamlit run dashboard.py --server.port=${PORT:-8501} --server.address=0.0.0.0 --server.headless=true
