@@ -1,28 +1,93 @@
-import json
-import os
 from datetime import datetime, timedelta
 
-from config.settings import SIGNAL_HISTORY_PATH, SIGNAL_MAX_OPEN_DAYS
+from config.settings import SIGNAL_MAX_OPEN_DAYS
+from src.db.session import SessionLocal
+from src.db.models import SignalRecord
+
+
+def _row_to_dict(row):
+
+    return {
+        "id": row.id,
+        "symbol": row.symbol,
+        "direction": row.direction,
+        "score": row.score,
+        "entry_price": row.entry_price,
+        "stop_loss_price": row.stop_loss_price,
+        "take_profit_price": row.take_profit_price,
+        "leverage": row.leverage,
+        "status": row.status,
+        "opened_at": row.opened_at,
+        "closed_at": row.closed_at,
+        "closed_price": row.closed_price
+    }
 
 
 def load_history():
 
-    if not os.path.exists(SIGNAL_HISTORY_PATH):
-        return []
+    """
+    تاریخچه سیگنال‌ها رو از دیتابیس می‌خونه (قبلاً از یک فایل JSON خونده
+    می‌شد). خروجی همون شکل قبلی (لیستی از دیکشنری) رو داره، فقط الان هر
+    دیکشنری یک "id" هم داره که برای ذخیره درست تغییرات در save_history لازمه.
+    """
 
-    with open(SIGNAL_HISTORY_PATH, "r") as file:
-        return json.load(file)
+    session = SessionLocal()
+
+    try:
+        rows = session.query(SignalRecord).order_by(SignalRecord.id).all()
+        return [_row_to_dict(row) for row in rows]
+    finally:
+        session.close()
 
 
 def save_history(history):
 
-    directory = os.path.dirname(SIGNAL_HISTORY_PATH)
+    """
+    لیست سیگنال‌ها رو با دیتابیس sync می‌کنه: رکوردهایی که "id" دارن
+    (یعنی از load_history اومدن) آپدیت می‌شن، رکوردهای بدون "id" (سیگنال
+    تازه از record_new_signals) به‌عنوان ردیف جدید insert می‌شن.
+    """
 
-    if directory:
-        os.makedirs(directory, exist_ok=True)
+    session = SessionLocal()
 
-    with open(SIGNAL_HISTORY_PATH, "w") as file:
-        json.dump(history, file, indent=4)
+    try:
+
+        existing_by_id = {
+            row.id: row
+            for row in session.query(SignalRecord).all()
+        }
+
+        for record in history:
+
+            record_id = record.get("id")
+
+            if record_id is not None and record_id in existing_by_id:
+
+                row = existing_by_id[record_id]
+                row.status = record["status"]
+                row.closed_at = record["closed_at"]
+                row.closed_price = record["closed_price"]
+
+            else:
+
+                session.add(SignalRecord(
+                    symbol=record["symbol"],
+                    direction=record["direction"],
+                    score=record.get("score"),
+                    entry_price=record["entry_price"],
+                    stop_loss_price=record["stop_loss_price"],
+                    take_profit_price=record["take_profit_price"],
+                    leverage=record.get("leverage"),
+                    status=record["status"],
+                    opened_at=record["opened_at"],
+                    closed_at=record.get("closed_at"),
+                    closed_price=record.get("closed_price")
+                ))
+
+        session.commit()
+
+    finally:
+        session.close()
 
 
 def _find_open_record(history, symbol, direction):
@@ -49,6 +114,7 @@ def record_new_signals(opportunities):
 
     history = load_history()
     added = 0
+    new_records = []
 
     for opportunity in opportunities:
 
@@ -61,7 +127,7 @@ def record_new_signals(opportunities):
         if existing is not None:
             continue
 
-        history.append({
+        new_records.append({
             "symbol": opportunity["symbol"],
             "direction": opportunity["direction"],
             "score": opportunity["score"],
@@ -77,8 +143,8 @@ def record_new_signals(opportunities):
 
         added += 1
 
-    if added:
-        save_history(history)
+    if new_records:
+        save_history(new_records)
 
     return added
 
@@ -118,7 +184,7 @@ def update_open_signals(price_fetcher):
     except Exception:
         return 0
 
-    updated = 0
+    updated_records = []
 
     for record in open_records:
 
@@ -150,12 +216,12 @@ def update_open_signals(price_fetcher):
             record["status"] = outcome
             record["closed_at"] = str(datetime.now())
             record["closed_price"] = current_price
-            updated += 1
+            updated_records.append(record)
 
-    if updated:
-        save_history(history)
+    if updated_records:
+        save_history(updated_records)
 
-    return updated
+    return len(updated_records)
 
 
 def calculate_pnl_percent(record):

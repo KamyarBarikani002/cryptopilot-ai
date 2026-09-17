@@ -1,5 +1,3 @@
-import json
-import os
 import time
 from datetime import datetime
 
@@ -25,47 +23,14 @@ from src.futures.signal_tracker import (
 )
 
 
-PANEL_SETTINGS_PATH = "database/panel_settings.json"
+from src.auth import require_login
+from src.panel_settings_store import (
+    load_panel_settings,
+    save_panel_settings,
+    DEFAULT_PANEL_SETTINGS as _DEFAULT_PANEL_SETTINGS
+)
 
-_DEFAULT_PANEL_SETTINGS = {
-    "demo_mode": False,
-    "top_n": SCAN_TOP_N,
-    "capital": int(INITIAL_CAPITAL),
-    "auto_refresh_enabled": False,
-    "refresh_minutes": 15
-}
-
-
-def load_panel_settings():
-
-    """
-    تنظیمات نوار کناری رو از اجرای قبلی بازیابی می‌کند تا کاربر هر بار که
-    پنل رو باز می‌کند مجبور نباشد دوباره همه چیز رو تنظیم کند.
-    """
-
-    if not os.path.exists(PANEL_SETTINGS_PATH):
-        return dict(_DEFAULT_PANEL_SETTINGS)
-
-    try:
-        with open(PANEL_SETTINGS_PATH, "r") as file:
-            saved = json.load(file)
-    except Exception:
-        return dict(_DEFAULT_PANEL_SETTINGS)
-
-    settings = dict(_DEFAULT_PANEL_SETTINGS)
-    settings.update(saved)
-    return settings
-
-
-def save_panel_settings(settings):
-
-    directory = os.path.dirname(PANEL_SETTINGS_PATH)
-
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-
-    with open(PANEL_SETTINGS_PATH, "w") as file:
-        json.dump(settings, file, indent=4)
+require_login()
 
 
 st.set_page_config(
