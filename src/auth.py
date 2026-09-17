@@ -19,9 +19,24 @@ load_dotenv()
 
 def _read_secret(name):
 
-    """مقدار متغیر محیطی رو می‌خونه و فاصله‌های اضافه اول/آخرش رو حذف می‌کنه."""
+    """
+    مقدار متغیر محیطی رو می‌خونه و فاصله‌های اضافه اول/آخرش رو حذف می‌کنه.
+
+    اگر متغیر با اسم دقیق پیدا نشه، بین کلیدهای محیط دنبال اسمی می‌گرده که
+    بعد از حذف فاصله‌ها برابر همین اسم باشه. دلیلش یک تجربه واقعی است: توی
+    پنل Railway اسم متغیر با یک فاصله اضافه ذخیره شده بود
+    ("APP_PASSWORD_SALT ")، که توی رابط کاربری اصلاً دیده نمی‌شد و باعث شد
+    برنامه فکر کند رمزی تنظیم نشده.
+    """
 
     value = os.environ.get(name)
+
+    if value is None:
+
+        for key, candidate in os.environ.items():
+            if key.strip() == name:
+                value = candidate
+                break
 
     if value is None:
         return None
@@ -47,9 +62,19 @@ def _environment_report() -> str:
     for name in ("APP_PASSWORD_SALT", "APP_PASSWORD_HASH"):
 
         raw = os.environ.get(name)
+        exact = raw is not None
+
+        if raw is None:
+            for key, candidate in os.environ.items():
+                if key.strip() == name:
+                    raw = candidate
+                    lines.append(name + ": FOUND but the variable NAME has extra whitespace")
+                    break
 
         if raw is None:
             lines.append(name + ": NOT FOUND")
+        elif not exact:
+            pass
         elif not raw.strip():
             lines.append(name + ": EMPTY")
         else:
