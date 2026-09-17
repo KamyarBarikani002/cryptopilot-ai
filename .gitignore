@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Local data & generated state (kept out of git; DB migrates from JSON automatically)
+database/*.db
+database/*.json
+logs/
+reports/
+journal/*.json
+screenshots/*
+
+# OS
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
