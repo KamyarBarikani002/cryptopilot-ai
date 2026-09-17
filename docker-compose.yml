@@ -1,0 +1,11 @@
+services:
+  cryptopilot:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      # وضعیت پرتفوی/سیگنال‌ها بیرون از کانتینر می‌مونه تا با هر دیپلوی جدید پاک نشه
+      - ./database:/app/database
+    restart: unless-stopped
