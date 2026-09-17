@@ -6,26 +6,15 @@
 scripts/set_password.py استفاده کن.
 """
 
-import hashlib
 import hmac
 import os
 
 import streamlit as st
 from dotenv import load_dotenv
 
+from src.password_utils import hash_password
+
 load_dotenv()
-
-_PBKDF2_ITERATIONS = 200_000
-
-
-def hash_password(password: str, salt: str) -> str:
-
-    return hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt.encode("utf-8"),
-        _PBKDF2_ITERATIONS
-    ).hex()
 
 
 def _password_is_configured() -> bool:
