@@ -19,6 +19,7 @@ from src.price_format import format_price
 from src.futures.futures_market_data import get_futures_prices
 from src.exchange_health import check_kucoin_connectivity
 from src.ui_common import render_storage_status
+from src.futures.risk_budget import daily_budget
 from src.futures.signal_tracker import (
     record_new_signals,
     update_open_signals,
@@ -101,6 +102,20 @@ with st.sidebar:
         step=10
     )
 
+    risk_percent = st.number_input(
+        "ریسک هر معامله (٪ سرمایه)",
+        min_value=0.1, max_value=3.0, step=0.1,
+        value=float(_saved["risk_percent"]),
+        help="اگر حد ضرر بخورد، این درصد از سرمایه از دست می‌رود. حجم پوزیشن از روی همین حساب می‌شود."
+    )
+
+    daily_loss_limit = st.number_input(
+        "سقف ضرر روزانه (٪ سرمایه)",
+        min_value=0.5, max_value=5.0, step=0.1,
+        value=float(_saved["daily_loss_limit"]),
+        help="مجموع زیان امروز + ریسک پوزیشن‌های باز از این بیشتر نمی‌شود."
+    )
+
     scan_clicked = st.button(
         "🔄 اسکن بازار",
         type="primary",
@@ -134,12 +149,31 @@ with st.sidebar:
         "top_n": top_n,
         "capital": int(capital),
         "auto_refresh_enabled": auto_refresh_enabled,
-        "refresh_minutes": refresh_minutes
+        "refresh_minutes": refresh_minutes,
+        "risk_percent": float(risk_percent),
+        "daily_loss_limit": float(daily_loss_limit),
     }
 
     if current_settings != st.session_state.panel_settings:
         st.session_state.panel_settings = current_settings
         save_panel_settings(current_settings)
+
+
+budget = daily_budget(load_history(), risk_percent, daily_loss_limit)
+
+with st.sidebar:
+    st.caption(
+        "🛡️ بودجه‌ی ضرر امروز: " + str(budget["used_percent"]) + "٪ زیان + "
+        + str(budget["open_risk_percent"]) + "٪ ریسک باز از سقف " + str(daily_loss_limit)
+        + "٪ — امروز " + str(budget["new_trades_allowed"]) + " معامله‌ی تازه‌ی دیگر مجاز است "
+        "(اگر همه‌ی سیگنال‌های ثبت‌شده را گرفته باشی)."
+    )
+
+if budget["new_trades_allowed"] == 0:
+    st.error(
+        "🛑 سقف ضرر روزانه پر شده (" + str(daily_loss_limit) + "٪). طبق قانون مدیریت "
+        "سرمایه‌ات امروز معامله‌ی تازه باز نکن؛ سیگنال‌ها فقط برای اطلاع نشان داده می‌شوند."
+    )
 
 
 if "scan_result" not in st.session_state:
@@ -179,14 +213,16 @@ if scan_clicked or should_auto_scan:
                     funding_fetcher=demo_funding_rate,
                     oi_fetcher=demo_open_interest_trend,
                     fear_greed_fetcher=demo_fear_greed_index,
-                    tick_size_fetcher=demo_tick_size
+                    tick_size_fetcher=demo_tick_size,
+                    risk_percent=risk_percent
                 )
 
             else:
 
                 result = scan_market(
                     top_n=top_n,
-                    capital=capital
+                    capital=capital,
+                    risk_percent=risk_percent
                 )
 
                 # ثبت/به‌روزرسانی تاریخچه فقط برای اسکن واقعی انجام می‌شود؛

@@ -14,7 +14,9 @@ DEFAULT_PANEL_SETTINGS = {
     "top_n": SCAN_TOP_N,
     "capital": int(INITIAL_CAPITAL),
     "auto_refresh_enabled": False,
-    "refresh_minutes": 15
+    "refresh_minutes": 15,
+    "risk_percent": 0.5,
+    "daily_loss_limit": 1.5,
 }
 
 
@@ -34,7 +36,11 @@ def load_panel_settings():
             "top_n": row.top_n,
             "capital": row.capital,
             "auto_refresh_enabled": bool(row.auto_refresh_enabled),
-            "refresh_minutes": row.refresh_minutes
+            "refresh_minutes": row.refresh_minutes,
+            "risk_percent": row.risk_percent if row.risk_percent is not None else DEFAULT_PANEL_SETTINGS["risk_percent"],
+            "daily_loss_limit": (
+                row.daily_loss_limit if row.daily_loss_limit is not None else DEFAULT_PANEL_SETTINGS["daily_loss_limit"]
+            ),
         }
 
     finally:
@@ -58,6 +64,8 @@ def save_panel_settings(settings):
         row.capital = settings["capital"]
         row.auto_refresh_enabled = settings["auto_refresh_enabled"]
         row.refresh_minutes = settings["refresh_minutes"]
+        row.risk_percent = settings.get("risk_percent", DEFAULT_PANEL_SETTINGS["risk_percent"])
+        row.daily_loss_limit = settings.get("daily_loss_limit", DEFAULT_PANEL_SETTINGS["daily_loss_limit"])
 
         session.commit()
 

@@ -23,6 +23,8 @@ class PanelSettings(Base):
     capital = Column(Integer, default=200)
     auto_refresh_enabled = Column(Boolean, default=False)
     refresh_minutes = Column(Integer, default=15)
+    risk_percent = Column(Float, nullable=True)        # ریسک هر معامله (٪ سرمایه)
+    daily_loss_limit = Column(Float, nullable=True)    # سقف ضرر روزانه (٪ سرمایه)
 
 
 class PortfolioState(Base):

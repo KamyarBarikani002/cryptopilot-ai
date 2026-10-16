@@ -9,6 +9,7 @@ require_login()
 from config.settings import FUTURES_TAKER_FEE_PERCENT, PROJECT_NAME, REWARD_RISK_RATIO  # noqa: E402
 from src.futures.backtest import equity_curve, split_halves, summarize  # noqa: E402
 from src.futures.backtest_job import BacktestJob  # noqa: E402
+from src.futures.portfolio_sim import simulate_account  # noqa: E402
 from src.futures.fundamental_engine import get_funding_history  # noqa: E402
 from src.futures.futures_market_data import (  # noqa: E402
     get_futures_klines_range,
@@ -63,7 +64,7 @@ state = job.snapshot()
 with st.form("backtest_form"):
 
     columns = st.columns(4)
-    top_n = columns[0].slider("تعداد ارزهای پرحجم", 5, 30, 30, step=5)
+    top_n = columns[0].slider("تعداد ارزهای پرحجم", 5, 60, 30, step=5)
     days = columns[1].slider("چند روز گذشته", 30, 180, 180, step=30)
     max_hold = columns[2].slider("حداکثر نگه‌داری (ساعت)", 12, 168, 72, step=12)
     use_funding = columns[3].checkbox("فیلتر فاندینگ تاریخی", value=True)
@@ -172,6 +173,57 @@ def _equity_svg(points, width=900, height=220, pad=28):
         + "</svg>"
     )
 
+
+st.subheader("💼 حساب واقعی با مدیریت سرمایه")
+st.caption(
+    "همه‌ی معاملات همه‌ی ارزها روی یک حساب و به ترتیب زمان: ریسک هر معامله درصدی "
+    "از سرمایه‌ی همان لحظه (سود مرکب)، و در هر روز (UTC) مجموع «زیان امروز + ریسک "
+    "پوزیشن‌های باز» از سقف ضرر روزانه بیشتر نمی‌شود؛ معامله‌ای که سقف را رد کند "
+    "گرفته نمی‌شود."
+)
+
+labels = [label for label, _ in report["results"]]
+account_columns = st.columns(4)
+chosen = account_columns[0].selectbox("استراتژی", labels)
+risk_percent = account_columns[1].number_input("ریسک هر معامله (٪)", 0.1, 3.0, 0.5, 0.1)
+daily_limit = account_columns[2].number_input("سقف ضرر روزانه (٪)", 0.5, 5.0, 1.5, 0.1)
+max_open = account_columns[3].number_input("حداکثر پوزیشن باز همزمان", 1, 10, 3, 1)
+
+chosen_trades = dict(report["results"])[chosen]
+account = simulate_account(chosen_trades, risk_percent, daily_limit, int(max_open))
+
+metric_columns = st.columns(5)
+metric_columns[0].metric("میانگین سود ماهانه", format(account["avg_month_percent"], ".1f") + "٪")
+metric_columns[1].metric(
+    "ماه‌های ≥ ۱۰٪", str(account["months_at_least_10"]) + " از " + str(account["full_months"])
+)
+metric_columns[2].metric("بدترین ماه", format(account["worst_month_percent"], ".1f") + "٪")
+metric_columns[3].metric("بدترین روز", format(account["worst_day_percent"], ".2f") + "٪")
+metric_columns[4].metric("بیشترین افت سرمایه", format(account["max_drawdown_percent"], ".1f") + "٪")
+
+st.caption(
+    "معاملات گرفته‌شده: " + str(account["taken"]) + " — ردشده به‌خاطر سقف ضرر روزانه: "
+    + str(account["skipped_daily_limit"]) + " — ردشده به‌خاطر سقف پوزیشن باز: "
+    + str(account["skipped_max_open"]) + ". ماه اول و آخر چون ناقص‌اند در میانگین حساب نشده‌اند."
+)
+
+r_per_month = sum(t["r"] for t in chosen_trades) / (report["settings"]["days"] / 30) if chosen_trades else 0
+if r_per_month > 0:
+    st.info(
+        "این استراتژی در این دوره به‌طور متوسط ماهی حدود " + format(r_per_month, ".1f")
+        + "R ساخته است. برای ۱۰٪ در ماه با همین تعداد و کیفیت سیگنال، ریسک هر "
+        "معامله باید حدود " + format(10 / r_per_month, ".1f") + "٪ باشد"
+        + (" — بیشتر از سقف ضرر روزانه‌ی تو، پس با این قانون فقط با سیگنال‌های "
+           "بیشتر (ارزهای بیشتر یا شرط‌های بازتر) قابل رسیدن است."
+           if 10 / r_per_month > daily_limit else ".")
+    )
+else:
+    st.warning("این استراتژی در این دوره سود خالص نساخته است.")
+
+st.dataframe(
+    [{"ماه": m["month"], "سود/زیان (٪)": m["return_percent"]} for m in account["months"]],
+    use_container_width=True, hide_index=True,
+)
 
 label, main_trades = report["results"][0]
 

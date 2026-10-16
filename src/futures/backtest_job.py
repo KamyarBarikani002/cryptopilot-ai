@@ -20,9 +20,9 @@ WARMUP_CANDLES = 300
 # اولین ردیف = استراتژی فعلی اسکنر. بقیه برای مقایسه‌اند.
 STRATEGY_VARIANTS = [
     ("خرید افت در روند — استراتژی فعلی اسکنر", "dip", {}),
-    ("خرید افت + فیلتر روند EMA200", "dip", {"use_ema200_filter": True}),
     ("خرید افت + ADX ≥ 20", "dip", {"adx_min": 20}),
-    ("خرید افت + فیلتر فاندینگ", "dip", {"use_funding_filter": True}),
+    ("خرید افت، RSI 35/65 (سیگنال بیشتر)", "dip", {"rsi_low": 35, "rsi_high": 65}),
+    ("خرید افت، RSI 35/65 + ADX ≥ 20", "dip", {"rsi_low": 35, "rsi_high": 65, "adx_min": 20}),
     ("پولبک در جهت روند (EMA + ADX)", "pullback", {}),
 ]
 

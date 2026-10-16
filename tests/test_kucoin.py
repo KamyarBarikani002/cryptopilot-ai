@@ -201,8 +201,12 @@ def test_dashboard_scan_and_health_check_render():
     by_label = {b.label: b for b in at.button}
     by_label["🔄 اسکن بازار"].click().run(timeout=60)
     assert not at.exception
-    assert not at.error, [e.value for e in at.error]
+    # the test database keeps every scanned signal as "open", so the daily
+    # loss-limit banner may legitimately appear; nothing else may be an error
+    errors = [e.value for e in at.error if "سقف ضرر روزانه" not in e.value]
+    assert not errors, errors
     assert any("تعداد ارزهای بررسی‌شده" in m.value for m in at.markdown)
+    assert any("بودجه‌ی ضرر امروز" in c.value for c in at.sidebar.caption)
 
 
 def test_dca_page_renders_with_kucoin_prices():

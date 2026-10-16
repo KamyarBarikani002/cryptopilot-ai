@@ -56,6 +56,7 @@ def scan_symbol(
     oi_fetcher=get_open_interest_trend,
     fear_greed_value=50,
     tick_size_fetcher=get_tick_size,
+    risk_percent=RISK_PER_TRADE_FUTURES,
 ):
 
     """یک فرصت (dict) یا None اگر الان شرایط ورود برقرار نیست."""
@@ -98,7 +99,7 @@ def scan_symbol(
         signal["entry"],
         signal["stop"],
         capital,
-        RISK_PER_TRADE_FUTURES,
+        risk_percent,
         MAX_LEVERAGE,
         min_reward_risk=REWARD_RISK_RATIO,
         fee_percent=FUTURES_TAKER_FEE_PERCENT,
@@ -134,6 +135,7 @@ def scan_market(
     oi_fetcher=get_open_interest_trend,
     fear_greed_fetcher=get_fear_greed_index,
     tick_size_fetcher=get_tick_size,
+    risk_percent=None,
 ):
     """
     همه‌ی fetcher ها قابل تزریق‌اند تا تست و حالت آزمایشی بدون اتصال به کوکوین
@@ -157,6 +159,7 @@ def scan_market(
             opportunity = scan_symbol(
                 symbol, capital, kline_fetcher, funding_fetcher, oi_fetcher,
                 fear_greed_value, tick_size_fetcher,
+                risk_percent if risk_percent is not None else RISK_PER_TRADE_FUTURES,
             )
             if opportunity is not None:
                 opportunities.append(opportunity)
