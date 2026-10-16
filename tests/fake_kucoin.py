@@ -3,6 +3,7 @@ A fake KuCoin for tests: routes requests.get(url, params, timeout) to fixtures
 built from responses captured live from the KuCoin public API on 2026-10-16.
 """
 
+import time
 from unittest import mock
 
 CALLS = []
@@ -53,23 +54,19 @@ CONTRACTS = [
 ]
 
 
-def futures_klines_oldest_first(symbol, n=210):
-    # real first row for XBTUSDTM, then the strategy's strongest setups:
-    # "up" symbols: steep uptrend with a shallow 14-candle dip (price stays above
-    # MA20, RSI < 30 -> best Long entry); others: downtrend with a shallow bounce
-    # (price stays below MA20, RSI > 70 -> best Short entry).
+def futures_klines_oldest_first(symbol, n=500):
+    # the strategy's textbook setups, ending with the last *closed* hour:
+    # "up" symbols: uptrend, 7-candle pullback, strong bullish trigger candle;
+    # the others: the mirror image (best Short entry).
+    from src.futures.demo_data import synthetic_candles
+    now_ms = int(time.time() * 1000)
+    end_ms = now_ms // 14_400_000 * 14_400_000          # a 4h boundary in the past
+    start_ms = end_ms - n * 3_600_000
     up = symbol in ("XBTUSDTM", "SOLUSDTM", "XRPUSDTM")
-    rows, t, close = [[1791424800000, 83065.2, 83256.4, 82878.3, 83127.4, 70821, 5883243.4033]], 1791424800000, 83127.4
-    for i in range(n - 1):
-        t += 3_600_000
-        in_last_14 = i >= n - 1 - 14
-        if up:
-            step = -20 if in_last_14 else 500
-        else:
-            step = 20 if in_last_14 else -300
-        open_, close = close, close + step
-        rows.append([t, open_, max(open_, close) + 30, min(open_, close) - 30, close, 100, 1])
-    return rows
+    rows = synthetic_candles("up" if up else "down", n, 100.0, start_ms)
+    last = float(next(c for c in CONTRACTS if c["symbol"] == symbol)["lastTradePrice"])
+    scale = last / rows[-1][4]
+    return [[c[0]] + [v * scale for v in c[1:5]] + [c[5], 1] for c in rows]
 
 
 # real OI history for XBTUSDTM (newest first)
@@ -99,6 +96,8 @@ def fake_get(url, params=None, timeout=None):
         return ok(CONTRACTS)
     if url == "https://api-futures.kucoin.com/api/v1/kline/query":
         return ok(futures_klines_oldest_first(params["symbol"]))
+    if url == "https://api-futures.kucoin.com/api/v1/contract/funding-rates":
+        return ok([{"symbol": params["symbol"], "fundingRate": 0.0001, "timepoint": params["from"] + 8 * 3_600_000}])
     if url == "https://api.kucoin.com/api/ua/v1/market/open-interest":
         return ok(OI_HISTORY[: int(params.get("pageSize", 7))])
     if "alternative.me" in url:

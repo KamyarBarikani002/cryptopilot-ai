@@ -1,4 +1,4 @@
-from config.settings import FEAR_GREED_API_URL, KUCOIN_SPOT_URL
+from config.settings import FEAR_GREED_API_URL, KUCOIN_FUTURES_URL, KUCOIN_SPOT_URL
 from src.exchange_client import ExchangeUnavailable, REQUEST_TIMEOUT_SECONDS, kucoin_get
 from src.futures.futures_market_data import get_active_contracts
 
@@ -119,3 +119,33 @@ def calculate_fundamental_score(
     total = funding_score + oi_score + fear_greed_score
 
     return round(_clamp(total, -100, 100), 2)
+
+
+def get_funding_history(symbol, start_ms, end_ms):
+
+    """
+    تاریخچه‌ی نرخ فاندینگ (٪) برای بک‌تست: [(time_ms, percent), ...].
+    کوکوین هر بار حداکثر حدود ۱۰۰ نقطه می‌دهد، پس ۳۰ روز به ۳۰ روز گرفته می‌شود.
+    """
+
+    page_ms = 30 * 24 * 3_600_000
+    points = {}
+    cursor = start_ms
+
+    while cursor < end_ms:
+
+        to_ms = min(cursor + page_ms, end_ms)
+        data = kucoin_get(
+            KUCOIN_FUTURES_URL + "/api/v1/contract/funding-rates",
+            params={"symbol": symbol, "from": cursor, "to": to_ms},
+        ) or []
+
+        if isinstance(data, dict):
+            data = data.get("dataList") or data.get("items") or []
+
+        for item in data:
+            points[int(item["timepoint"])] = float(item["fundingRate"]) * 100
+
+        cursor = to_ms
+
+    return sorted(points.items())

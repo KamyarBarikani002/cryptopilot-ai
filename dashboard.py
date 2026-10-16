@@ -11,8 +11,10 @@ from src.futures.demo_data import (
     demo_klines,
     demo_funding_rate,
     demo_open_interest_trend,
-    demo_fear_greed_index
+    demo_fear_greed_index,
+    demo_tick_size
 )
+from src.price_format import format_price
 from src.futures.futures_market_data import get_futures_prices
 from src.exchange_health import check_kucoin_connectivity
 from src.ui_common import render_storage_status
@@ -60,10 +62,10 @@ st.markdown(
 st.title("📊 " + PROJECT_NAME + " — دستیار سرمایه‌گذاری فیوچرز")
 
 st.caption(
-    "این ابزار سیگنال‌ها را از ترکیب تحلیل تکنیکال (روند + RSI) و تحلیل "
-    "فاندامنتال (نرخ فاندینگ، روند Open Interest، شاخص ترس‌وطمع بازار) "
-    "می‌سازد؛ تضمینی برای سود وجود ندارد و معامله را خودتان به‌صورت دستی در "
-    "صرافی انجام می‌دهید."
+    "سیگنال‌ها فقط در جهت روند غالب (۱ ساعته و ۴ ساعته) و بعد از یک اصلاح "
+    "کوتاه داده می‌شوند؛ حد ضرر پشت آخرین کف/سقف و حد سود با نسبت دست‌کم ۱ به ۲ "
+    "بعد از کارمزد. فاندینگ، Open Interest و ترس‌وطمع در امتیاز اطمینان اثر "
+    "دارند. تضمینی برای سود وجود ندارد و معامله را خودتان دستی انجام می‌دهید."
 )
 
 
@@ -175,7 +177,8 @@ if scan_clicked or should_auto_scan:
                     kline_fetcher=demo_klines,
                     funding_fetcher=demo_funding_rate,
                     oi_fetcher=demo_open_interest_trend,
-                    fear_greed_fetcher=demo_fear_greed_index
+                    fear_greed_fetcher=demo_fear_greed_index,
+                    tick_size_fetcher=demo_tick_size
                 )
 
             else:
@@ -283,18 +286,21 @@ def render_table(opportunities, direction_label):
 
         rows.append({
             "ارز": o["symbol"],
-            "امتیاز ترکیبی": o["score"],
-            "امتیاز تکنیکال": o["technical_score"],
-            "امتیاز فاندامنتال": o["fundamental_score"],
-            "فاندینگ (٪)": o["funding_rate_percent"],
-            "روند OI (٪)": o["oi_trend_percent"],
-            "قیمت ورود": o["entry_price"],
-            "حد ضرر": o["stop_loss_price"],
-            "حد سود": o["take_profit_price"],
+            "اطمینان (۰-۱۰۰)": o["confidence"],
+            "قیمت ورود": format_price(o["entry_price"]),
+            "حد ضرر": format_price(o["stop_loss_price"]) + "  (-" + str(o["stop_loss_percent"]) + "٪)",
+            "حد سود": format_price(o["take_profit_price"]) + "  (+" + str(o["take_profit_percent"]) + "٪)",
+            "ریسک به ریوارد": "1 : " + format(o["reward_risk_ratio"], ".2f"),
             "اهرم پیشنهادی": str(o["leverage"]) + "x",
             "حجم پوزیشن ($)": o["position_size_usd"],
             "مارجین لازم ($)": o["margin_required_usd"],
-            "نوسان (٪)": o["volatility_percent"],
+            "ریسک ($)": o["risk_amount_usd"],
+            "کیفیت ستاپ": o["technical_score"],
+            "امتیاز فاندامنتال": o["fundamental_score"],
+            "ADX": o["adx"],
+            "RSI": o["rsi"],
+            "فاندینگ (٪)": o["funding_rate_percent"],
+            "روند OI (٪)": o["oi_trend_percent"],
         })
 
     st.dataframe(
@@ -372,9 +378,9 @@ with tab_history:
                     {
                         "ارز": r["symbol"],
                         "جهت": r["direction"],
-                        "قیمت ورود": r["entry_price"],
-                        "حد ضرر": r["stop_loss_price"],
-                        "حد سود": r["take_profit_price"],
+                        "قیمت ورود": format_price(r["entry_price"]),
+                        "حد ضرر": format_price(r["stop_loss_price"]),
+                        "حد سود": format_price(r["take_profit_price"]),
                         "زمان باز شدن": r["opened_at"],
                     }
                     for r in open_records
@@ -404,8 +410,8 @@ with tab_history:
                         "ارز": r["symbol"],
                         "جهت": r["direction"],
                         "نتیجه": r["status"],
-                        "قیمت ورود": r["entry_price"],
-                        "قیمت خروج": r["closed_price"],
+                        "قیمت ورود": format_price(r["entry_price"]),
+                        "قیمت خروج": format_price(r["closed_price"]),
                         "سود/زیان (٪)": calculate_pnl_percent(r),
                         "زمان بسته شدن": r["closed_at"],
                     }
@@ -418,18 +424,25 @@ with tab_history:
 
 st.divider()
 
-with st.expander("ℹ️ امتیاز ترکیبی چطور محاسبه می‌شود؟"):
+with st.expander("ℹ️ سیگنال‌ها چطور ساخته می‌شوند؟"):
 
     st.markdown(
-        "امتیاز نهایی هر ارز (که تصمیم Long/Short بر اساس آن گرفته می‌شود) "
-        "ترکیبی وزن‌دار از دو بخش است:\n\n"
-        "- **امتیاز تکنیکال (وزن ۶۰٪):** بر اساس روند قیمت نسبت به میانگین "
-        "متحرک و RSI.\n"
-        "- **امتیاز فاندامنتال (وزن ۴۰٪):** بر اساس نرخ فاندینگ (پوزیشن‌های "
-        "شلوغ لانگ/شورت)، روند Open Interest (تایید یا تضعیف روند با ورود/"
-        "خروج پول) و شاخص ترس‌وطمع کل بازار.\n\n"
-        "این وزن‌ها در `config/settings.py` قابل تغییرند "
-        "(`TECHNICAL_WEIGHT` و `FUNDAMENTAL_WEIGHT`)."
+        "**شرط ورود (همه باید برقرار باشند):**\n\n"
+        "1. روند ۴ ساعته و ۱ ساعته هم‌جهت باشند (قیمت و EMA50 نسبت به EMA200 و "
+        "شیب EMA50 چهارساعته).\n"
+        "2. روند واقعاً قوی باشد، نه بازار رنج (ADX دست‌کم ۲۰).\n"
+        "3. قیمت یک اصلاح کوتاه تا حوالی EMA20 کرده باشد، بدون شکستن ساختار.\n"
+        "4. کندل آخر دوباره در جهت روند بسته شده باشد (شکست سقف/کف کندل قبل، "
+        "RSI در جهت روند و هنوز اشباع نیست، حجم کمتر از معمول نیست).\n"
+        "5. بازار در همان جهت بیش از حد شلوغ نباشد (فاندینگ).\n\n"
+        "**حد ضرر** پشت آخرین کف/سقف ۱۰ کندل اخیر (بین ۱ تا ۳ برابر ATR). "
+        "**حد سود** طوری که سود خالص بعد از کارمزد ورود و خروج (هر طرف "
+        "۰٫۰۶٪) دست‌کم **۲ برابر** زیان خالص باشد. هر دو به گام قیمت همان "
+        "قرارداد در کوکوین گرد می‌شوند.\n\n"
+        "**اطمینان (۰ تا ۱۰۰)** فقط برای مرتب کردن است: ۷۵٪ کیفیت ستاپ (قدرت "
+        "روند، فضای RSI، حجم، نزدیکی ورود به EMA20) و ۲۵٪ هم‌جهتی فاندامنتال "
+        "(فاندینگ، Open Interest، ترس‌وطمع).\n\n"
+        "عملکرد این قوانین روی داده‌ی گذشته‌ی کوکوین را در صفحه‌ی «بک‌تست» ببین."
     )
 
 st.warning(

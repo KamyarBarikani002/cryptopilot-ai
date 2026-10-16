@@ -1,114 +1,120 @@
+"""
+اسکنر فیوچرز: پرحجم‌ترین قراردادهای کوکوین را با استراتژی «پولبک در جهت روند»
+(src/futures/strategy.py) بررسی می‌کند و برای هر فرصت یک پلن معامله با نسبت
+سود به ضرر دست‌کم ۱ به ۲ (بعد از کارمزد) می‌سازد.
+
+فاندامنتال (فاندینگ، روند Open Interest، ترس‌وطمع) شرط ورود نیست، به‌جز فیلتر
+فاندینگ خیلی شلوغ؛ فقط در امتیاز اطمینان و ترتیب نمایش اثر دارد.
+"""
+
 from config.settings import (
+    FUTURES_TAKER_FEE_PERCENT,
     INITIAL_CAPITAL,
-    SCAN_TOP_N,
-    SCAN_INTERVAL,
-    RISK_PER_TRADE_FUTURES,
     MAX_LEVERAGE,
     REWARD_RISK_RATIO,
-    LONG_SCORE_THRESHOLD,
-    SHORT_SCORE_THRESHOLD,
-    TECHNICAL_WEIGHT,
-    FUNDAMENTAL_WEIGHT
+    RISK_PER_TRADE_FUTURES,
+    SCAN_CANDLES,
+    SCAN_INTERVAL,
+    SCAN_TOP_N,
 )
-from src.futures.futures_market_data import get_top_symbols_by_volume, get_futures_klines
-from src.futures.opportunity_engine import analyze_symbol, extract_closes, classify_opportunity
-from src.futures.futures_risk import (
-    estimate_volatility_percent,
-    suggest_stop_loss_percent,
-    calculate_futures_trade_plan
-)
+from src.futures import strategy
 from src.futures.fundamental_engine import (
+    calculate_fundamental_score,
+    get_fear_greed_index,
     get_funding_rate,
     get_open_interest_trend,
-    get_fear_greed_index,
-    calculate_fundamental_score
 )
+from src.futures.futures_market_data import (
+    get_futures_klines,
+    get_tick_size,
+    get_top_symbols_by_volume,
+)
+from src.futures.futures_risk import build_trade_plan
+
+
+def closed_futures_klines(symbol, interval, limit):
+
+    return get_futures_klines(symbol, interval, limit, closed_only=True)
+
+
+def _safe(fetch, symbol, default):
+
+    try:
+        return fetch(symbol)
+    except Exception:
+        return default
 
 
 def scan_symbol(
     symbol,
     capital,
-    kline_fetcher=get_futures_klines,
+    kline_fetcher=closed_futures_klines,
     funding_fetcher=get_funding_rate,
     oi_fetcher=get_open_interest_trend,
-    fear_greed_value=50
+    fear_greed_value=50,
+    tick_size_fetcher=get_tick_size,
 ):
-    """
-    یک ارز رو هم از نظر تکنیکال (روند + RSI) و هم از نظر فاندامنتال (فاندینگ،
-    روند Open Interest، ترس‌وطمع کل بازار) بررسی می‌کند و این دو را در یک
-    امتیاز نهایی (combined_score) ترکیب می‌کند؛ تصمیم Long/Short/None بر
-    اساس همین امتیاز نهایی گرفته می‌شود، نه فقط تکنیکال.
 
-    funding_fetcher و oi_fetcher قابل تزریق هستند (مثل symbol_fetcher/
-    kline_fetcher در scan_market) تا هم تست/دموی بدون اتصال به کوکوین ممکن
-    باشد و هم رفتار پیش‌فرض (اتصال واقعی) دست‌نخورده بماند.
-    """
+    """یک فرصت (dict) یا None اگر الان شرایط ورود برقرار نیست."""
 
-    candles = kline_fetcher(symbol, SCAN_INTERVAL)
+    candles = kline_fetcher(symbol, SCAN_INTERVAL, SCAN_CANDLES)
 
-    result = analyze_symbol(symbol, candles)
+    if len(candles) < strategy.MIN_CANDLES:
+        raise ValueError(
+            "فقط " + str(len(candles)) + " کندل موجود است؛ دست‌کم "
+            + str(strategy.MIN_CANDLES) + " لازم است (احتمالاً ارز تازه لیست شده)."
+        )
 
-    if result is None:
+    funding_rate_percent = _safe(funding_fetcher, symbol, None)
+
+    signal = strategy.latest_signal(candles, funding_rate_percent)
+
+    if signal is None:
         return None
 
-    closes = extract_closes(candles)
+    direction = signal["direction"]
+    sign = 1 if direction == "LONG" else -1
 
-    price_trend_up = result["price"] > result["ma"]
-
-    try:
-        funding_rate_percent = funding_fetcher(symbol)
-    except Exception:
-        funding_rate_percent = 0.0
-
-    try:
-        oi_trend_percent = oi_fetcher(symbol)
-    except Exception:
-        oi_trend_percent = 0.0
+    # Open Interest فقط برای ارزهایی که سیگنال دارند گرفته می‌شود (درخواست کمتر)
+    oi_trend_percent = _safe(oi_fetcher, symbol, 0.0)
 
     fundamental_score = calculate_fundamental_score(
-        funding_rate_percent,
-        oi_trend_percent,
-        fear_greed_value,
-        price_trend_up
+        funding_rate_percent or 0.0, oi_trend_percent, fear_greed_value, direction == "LONG"
     )
 
-    combined_score = round(
-        TECHNICAL_WEIGHT * result["technical_score"]
-        + FUNDAMENTAL_WEIGHT * fundamental_score
-    )
+    # اطمینان ۰ تا ۱۰۰: ۷۵٪ کیفیت ستاپ تکنیکال + ۲۵٪ هم‌جهتی فاندامنتال
+    fundamental_alignment = (fundamental_score * sign + 100) / 2
+    confidence = round(0.75 * signal["strength"] + 0.25 * fundamental_alignment)
 
-    direction = classify_opportunity(
-        combined_score,
-        LONG_SCORE_THRESHOLD,
-        SHORT_SCORE_THRESHOLD
-    )
-
-    if direction == "NONE":
-        return None
-
-    volatility_percent = estimate_volatility_percent(closes)
-    stop_loss_percent = suggest_stop_loss_percent(volatility_percent)
-
-    plan = calculate_futures_trade_plan(
-        direction, result["price"], capital, stop_loss_percent,
-        RISK_PER_TRADE_FUTURES, REWARD_RISK_RATIO, MAX_LEVERAGE
+    plan = build_trade_plan(
+        direction,
+        signal["entry"],
+        signal["stop"],
+        capital,
+        RISK_PER_TRADE_FUTURES,
+        MAX_LEVERAGE,
+        min_reward_risk=REWARD_RISK_RATIO,
+        fee_percent=FUTURES_TAKER_FEE_PERCENT,
+        tick_size=_safe(tick_size_fetcher, symbol, None),
     )
 
     opportunity = {
         "symbol": symbol,
-        "price": result["price"],
-        "ma": result["ma"],
-        "rsi": result["rsi"],
-        "technical_score": result["technical_score"],
+        "direction": direction,
+        "price": signal["entry"],
+        "score": confidence * sign,
+        "confidence": confidence,
+        "technical_score": signal["strength"],
         "fundamental_score": fundamental_score,
-        "funding_rate_percent": round(funding_rate_percent, 4),
+        "funding_rate_percent": round(funding_rate_percent, 4) if funding_rate_percent is not None else None,
         "oi_trend_percent": round(oi_trend_percent, 2),
         "fear_greed_index": fear_greed_value,
-        "score": combined_score,
-        "direction": direction
+        "rsi": signal["rsi"],
+        "adx": signal["adx"],
+        "volatility_percent": signal["atr_percent"],
     }
-    opportunity["volatility_percent"] = round(volatility_percent, 2)
     opportunity.update(plan)
+
     return opportunity
 
 
@@ -116,19 +122,17 @@ def scan_market(
     top_n=None,
     capital=None,
     symbol_fetcher=get_top_symbols_by_volume,
-    kline_fetcher=get_futures_klines,
+    kline_fetcher=closed_futures_klines,
     funding_fetcher=get_funding_rate,
     oi_fetcher=get_open_interest_trend,
-    fear_greed_fetcher=get_fear_greed_index
+    fear_greed_fetcher=get_fear_greed_index,
+    tick_size_fetcher=get_tick_size,
 ):
     """
-    symbol_fetcher، kline_fetcher، funding_fetcher، oi_fetcher و
-    fear_greed_fetcher همگی قابل تزریق هستند تا هم تست/دموی بدون اتصال به
-    کوکوین ممکن باشد و هم رفتار پیش‌فرض (اتصال واقعی) دست‌نخورده بماند.
-
-    شاخص ترس‌وطمع فقط یک‌بار در کل اسکن گرفته می‌شود (نه به‌ازای هر ارز)،
-    چون این شاخص مربوط به کل بازار است، نه یک ارز خاص.
+    همه‌ی fetcher ها قابل تزریق‌اند تا تست و حالت آزمایشی بدون اتصال به کوکوین
+    کار کنند. شاخص ترس‌وطمع فقط یک‌بار در کل اسکن گرفته می‌شود.
     """
+
     top_n = top_n if top_n is not None else SCAN_TOP_N
     capital = capital if capital is not None else INITIAL_CAPITAL
     symbols = symbol_fetcher(top_n)
@@ -140,22 +144,25 @@ def scan_market(
 
     opportunities = []
     skipped = []
+
     for symbol in symbols:
         try:
             opportunity = scan_symbol(
-                symbol, capital, kline_fetcher,
-                funding_fetcher, oi_fetcher, fear_greed_value
+                symbol, capital, kline_fetcher, funding_fetcher, oi_fetcher,
+                fear_greed_value, tick_size_fetcher,
             )
             if opportunity is not None:
                 opportunities.append(opportunity)
         except Exception as error:
             skipped.append({"symbol": symbol, "error": str(error)})
-    longs = sorted([o for o in opportunities if o["direction"] == "LONG"], key=lambda o: o["score"], reverse=True)
-    shorts = sorted([o for o in opportunities if o["direction"] == "SHORT"], key=lambda o: o["score"])
+
+    longs = sorted([o for o in opportunities if o["direction"] == "LONG"], key=lambda o: o["confidence"], reverse=True)
+    shorts = sorted([o for o in opportunities if o["direction"] == "SHORT"], key=lambda o: o["confidence"], reverse=True)
+
     return {
         "scanned": len(symbols),
         "longs": longs,
         "shorts": shorts,
         "skipped": skipped,
-        "fear_greed_index": fear_greed_value
+        "fear_greed_index": fear_greed_value,
     }

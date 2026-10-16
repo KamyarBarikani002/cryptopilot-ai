@@ -9,6 +9,7 @@
 """
 
 import os
+import time
 from unittest import mock
 
 import pytest
@@ -127,6 +128,27 @@ def test_full_scan_end_to_end():
         assert o["stop_loss_price"] < o["entry_price"] < o["take_profit_price"], o
     for o in result["shorts"]:
         assert o["take_profit_price"] < o["entry_price"] < o["stop_loss_price"], o
+    for o in result["longs"] + result["shorts"]:
+        assert o["reward_risk_ratio"] >= 2, o
+        assert 0 <= o["confidence"] <= 100
+
+
+def test_pepe_prices_keep_their_decimals():
+    from src.futures.scanner import scan_market
+    pepe = [o for o in scan_market(top_n=6, capital=200)["shorts"] if o["symbol"] == "PEPEUSDTM"][0]
+    assert pepe["entry_price"] == pytest.approx(4.0879e-6)
+    assert 4.0879e-6 < pepe["stop_loss_price"] < 4.4e-6
+    assert 3.6e-6 < pepe["take_profit_price"] < 4.0879e-6
+    assert pepe["stop_loss_price"] != round(pepe["stop_loss_price"], 6), "must not be cut to 6 decimals"
+
+
+def test_the_still_open_candle_is_ignored(kucoin):
+    from src.futures.futures_market_data import get_futures_klines
+    now_ms = int(time.time() * 1000)
+    open_candle = [now_ms // 3_600_000 * 3_600_000, 1, 2, 0.5, 1.5, 10, 1]
+    with mock.patch("fake_kucoin.futures_klines_oldest_first", lambda s, n=500: [[1, 1, 1, 1, 1, 1, 1], open_candle]):
+        assert len(get_futures_klines("XBTUSDTM", "1h", 100)) == 2
+        assert get_futures_klines("XBTUSDTM", "1h", 100, closed_only=True) == [[1, 1.0, 1.0, 1.0, 1.0, 1.0]]
 
 
 # ---------------- error handling ----------------
@@ -206,3 +228,29 @@ def test_storage_status_is_calm_on_postgres():
         at.run(timeout=60)
     assert not any("SQLite" in w.value for w in at.sidebar.warning)
     assert any("Postgres" in c.value for c in at.sidebar.caption)
+
+
+def test_dashboard_demo_mode_shows_long_and_short_with_decimals():
+    at = _app("dashboard.py")
+    at.run(timeout=60)
+    at.checkbox[0].check().run(timeout=60)          # demo mode
+    by_label = {b.label: b for b in at.button}
+    by_label["🔄 اسکن بازار"].click().run(timeout=60)
+    assert not at.exception
+    tables = [df.value for df in at.dataframe]
+    flat = " ".join(str(v) for t in tables for v in t.to_dict("records"))
+    assert "PEPEUSDTM" in flat and "0.0000040879" in flat
+    assert "1 : 2.0" in flat
+    at.checkbox[0].uncheck().run(timeout=60)        # the setting is saved; leave it off
+
+
+def test_backtest_page_runs():
+    at = _app("pages/2_Backtest.py")
+    at.run(timeout=60)
+    assert not at.exception
+    at.button[0].click().run(timeout=120)
+    assert not at.exception, at.exception
+    assert not at.error, [e.value for e in at.error]
+    assert any("مقایسه" in h.value for h in at.subheader)
+    summary = at.dataframe[0].value
+    assert list(summary["استراتژی"])[0].startswith("نسخه‌ی جدید")

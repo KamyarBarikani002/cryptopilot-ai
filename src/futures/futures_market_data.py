@@ -85,7 +85,7 @@ def get_top_symbols_by_volume(top_n, quote_asset="USDT"):
     return [contract["symbol"] for contract in eligible[:top_n]]
 
 
-def get_futures_klines(symbol, interval, limit=100):
+def get_futures_klines(symbol, interval, limit=100, closed_only=False):
 
     """کندل‌ها به شکل استاندارد [time_ms, open, high, low, close, volume]، قدیم به جدید."""
 
@@ -113,6 +113,12 @@ def get_futures_klines(symbol, interval, limit=100):
 
     candles.sort(key=lambda candle: candle[0])
 
+    if closed_only:
+        # کندل آخر کوکوین معمولاً هنوز در حال شکل گرفتن است؛ تحلیل فقط روی
+        # کندل‌های بسته‌شده انجام می‌شود تا سیگنال وسط کندل عوض نشود.
+        step_ms = granularity * 60_000
+        candles = [c for c in candles if c[0] + step_ms <= now_ms]
+
     return candles[-limit:]
 
 
@@ -138,3 +144,51 @@ def get_futures_prices(symbols):
             prices[symbol] = float(contract["lastTradePrice"])
 
     return prices
+
+
+def get_tick_size(symbol):
+
+    """گام قیمت قرارداد (مثلاً 0.1 برای بیت‌کوین، 1e-10 برای PEPE)، یا None."""
+
+    try:
+        contract = get_active_contracts().get(symbol)
+    except ExchangeUnavailable:
+        return None
+
+    if not contract or contract.get("tickSize") in (None, 0):
+        return None
+
+    return float(contract["tickSize"])
+
+
+def get_futures_klines_range(symbol, interval, start_ms, end_ms, pause_seconds=0.1):
+
+    """
+    کندل‌های یک بازه‌ی طولانی (برای بک‌تست)؛ چون کوکوین حداکثر ۵۰۰ کندل در هر
+    درخواست می‌دهد، بازه تکه‌تکه گرفته می‌شود. فقط کندل‌های بسته‌شده برمی‌گردند.
+    """
+
+    granularity = _GRANULARITY_MINUTES[interval]
+    step_ms = granularity * 60_000
+    page_ms = step_ms * 450
+    rows = {}
+    cursor = start_ms
+
+    while cursor < end_ms:
+
+        to_ms = min(cursor + page_ms, end_ms)
+        data = kucoin_get(
+            KUCOIN_FUTURES_URL + "/api/v1/kline/query",
+            params={"symbol": symbol, "granularity": granularity, "from": cursor, "to": to_ms},
+        ) or []
+
+        for row in data:
+            rows[int(row[0])] = [int(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])]
+
+        cursor = to_ms
+        if pause_seconds:
+            time.sleep(pause_seconds)
+
+    now_ms = int(time.time() * 1000)
+
+    return [rows[t] for t in sorted(rows) if t + step_ms <= now_ms]

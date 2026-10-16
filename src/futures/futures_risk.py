@@ -58,62 +58,96 @@ def suggest_leverage(stop_loss_percent, max_leverage, safety_factor=1.5):
     return max(1, min(round(raw_leverage, 1), max_leverage))
 
 
-def calculate_futures_trade_plan(
+def _loss_per_unit(entry_price, stop_price, fee_rate):
+
+    """زیان هر واحد اگر حد ضرر بخورد: فاصله تا حد ضرر + کارمزد ورود و خروج."""
+
+    return abs(entry_price - stop_price) + fee_rate * (entry_price + stop_price)
+
+
+def net_reward_risk(direction, entry_price, stop_price, take_profit_price, fee_rate):
+
+    """نسبت سود خالص به زیان خالص (بعد از کارمزد ورود و خروج)."""
+
+    loss = _loss_per_unit(entry_price, stop_price, fee_rate)
+
+    if direction == "LONG":
+        gain = (take_profit_price - entry_price) - fee_rate * (entry_price + take_profit_price)
+    else:
+        gain = (entry_price - take_profit_price) - fee_rate * (entry_price + take_profit_price)
+
+    return gain / loss if loss > 0 else 0.0
+
+
+def build_trade_plan(
     direction,
     entry_price,
+    stop_price,
     capital,
-    stop_loss_percent,
     risk_percent,
-    reward_risk_ratio,
-    max_leverage
+    max_leverage,
+    min_reward_risk=2.0,
+    fee_percent=0.06,
+    tick_size=None,
 ):
 
     """
-    برای یک فرصت Long یا Short، حد ضرر/حد سود/اهرم پیشنهادی/حجم پوزیشن رو
-    بر مبنای ریسک ثابت (risk_percent از کل سرمایه) حساب می‌کند.
+    پلن معامله با حد ضرر مشخص (از ساختار نمودار/ATR) و حد سودی که نسبت
+    سود به ریسک را **بعد از کارمزد** دست‌کم min_reward_risk (پیش‌فرض ۱ به ۲)
+    نگه می‌دارد.
+
+    - حد ضرر و حد سود به گام قیمت (tickSize) همان قرارداد گرد می‌شوند؛ حد سود
+      همیشه رو به دورتر گرد می‌شود تا نسبت هیچ‌وقت زیر حداقل نرود.
+    - حجم پوزیشن طوری است که اگر حد ضرر بخورد (با کارمزد)، دقیقاً risk_percent
+      از سرمایه از دست برود.
 
     این فقط یک پیشنهاد قاعده‌محور برای مدیریت ریسک است، نه تضمین سود یا
     تضمین جلوگیری از لیکویید شدن.
     """
 
-    risk_amount = capital * (risk_percent / 100)
+    from src.price_format import round_to_tick
 
-    position_size = risk_amount / (stop_loss_percent / 100)
+    if direction not in ("LONG", "SHORT"):
+        raise ValueError("direction must be LONG or SHORT")
 
-    leverage = suggest_leverage(
-        stop_loss_percent,
-        max_leverage
-    )
+    fee_rate = fee_percent / 100
 
-    # حجم پوزیشن رو به‌گونه‌ای محدود می‌کنیم که مارجین لازم از کل سرمایه بیشتر نشود
-    max_position_size = capital * leverage
-    position_size = min(position_size, max_position_size)
+    stop_price = round_to_tick(stop_price, tick_size, "down" if direction == "LONG" else "up")
 
-    margin_required = position_size / leverage
+    if (direction == "LONG" and stop_price >= entry_price) or (direction == "SHORT" and stop_price <= entry_price):
+        raise ValueError("stop must be on the losing side of the entry")
+
+    loss = _loss_per_unit(entry_price, stop_price, fee_rate)
+    needed_gain = min_reward_risk * loss
 
     if direction == "LONG":
+        take_profit = (needed_gain + entry_price * (1 + fee_rate)) / (1 - fee_rate)
+        take_profit = round_to_tick(take_profit, tick_size, "up")
+    else:
+        take_profit = (entry_price * (1 - fee_rate) - needed_gain) / (1 + fee_rate)
+        take_profit = round_to_tick(take_profit, tick_size, "down")
+        if take_profit <= 0:
+            raise ValueError("take profit would be below zero")
 
-        stop_loss_price = entry_price * (1 - stop_loss_percent / 100)
+    stop_loss_percent = abs(entry_price - stop_price) / entry_price * 100
 
-        take_profit_price = entry_price * (
-            1 + (stop_loss_percent * reward_risk_ratio) / 100
-        )
+    risk_amount = capital * (risk_percent / 100)
+    quantity = risk_amount / loss
+    position_size = quantity * entry_price
 
-    else:  # SHORT
-
-        stop_loss_price = entry_price * (1 + stop_loss_percent / 100)
-
-        take_profit_price = entry_price * (
-            1 - (stop_loss_percent * reward_risk_ratio) / 100
-        )
+    leverage = suggest_leverage(stop_loss_percent, max_leverage)
+    position_size = min(position_size, capital * leverage)
 
     return {
         "entry_price": entry_price,
-        "stop_loss_price": round(stop_loss_price, 6),
-        "take_profit_price": round(take_profit_price, 6),
+        "stop_loss_price": stop_price,
+        "take_profit_price": take_profit,
         "stop_loss_percent": round(stop_loss_percent, 2),
+        "take_profit_percent": round(abs(take_profit - entry_price) / entry_price * 100, 2),
+        "reward_risk_ratio": round(net_reward_risk(direction, entry_price, stop_price, take_profit, fee_rate), 2),
         "leverage": leverage,
         "position_size_usd": round(position_size, 2),
-        "margin_required_usd": round(margin_required, 2),
-        "risk_amount_usd": round(risk_amount, 2)
+        "margin_required_usd": round(position_size / leverage, 2),
+        "risk_amount_usd": round(risk_amount, 2),
+        "fee_percent": fee_percent,
     }
