@@ -193,7 +193,37 @@ risk_percent = account_columns[1].number_input("ریسک هر معامله (٪)"
 daily_limit = account_columns[2].number_input("سقف ضرر روزانه (٪)", 0.5, 5.0, 1.5, 0.1)
 max_open = account_columns[3].number_input("حداکثر پوزیشن باز همزمان", 1, 10, 3, 1)
 
-chosen_trades = dict(report["results"])[chosen]
+VOLUME_TIERS = [
+    ("۳۰ ارز پرحجم اول", 1, 30),
+    ("رتبه‌ی ۳۱ تا ۱۰۰", 31, 100),
+    ("رتبه‌ی ۱۰۱ تا ۲۰۰", 101, 200),
+    ("رتبه‌ی ۲۰۱ به بعد (کم‌حجم)", 201, 10**9),
+]
+# report["symbols"] به ترتیب حجم ۲۴ ساعته (پرحجم اول) است
+ranks = {symbol: k + 1 for k, symbol in enumerate(report["symbols"])}
+all_chosen = dict(report["results"])[chosen]
+
+if ranks:
+    st.markdown("**نتیجه‌ی همین استراتژی به تفکیک حجم معاملات ارز** (رتبه بر اساس حجم ۲۴ ساعته‌ی امروز)")
+    tier_rows = []
+    for name, low, high in VOLUME_TIERS:
+        tier = summarize([t for t in all_chosen if low <= ranks.get(t["symbol"], 10**9) <= high])
+        if tier["trades"]:
+            tier_rows.append({
+                "گروه": name, "معاملات": tier["trades"], "نرخ برد (٪)": tier["win_rate"],
+                "مجموع (R)": tier["total_r"], "Profit factor": tier["profit_factor"],
+            })
+    st.dataframe(tier_rows, use_container_width=True, hide_index=True)
+
+    universe = st.selectbox(
+        "حساب را فقط با این ارزها حساب کن",
+        ["همه‌ی ارزها", "۳۰ پرحجم", "۱۰۰ پرحجم", "۲۰۰ پرحجم"],
+    )
+    limit_rank = {"همه‌ی ارزها": 10**9, "۳۰ پرحجم": 30, "۱۰۰ پرحجم": 100, "۲۰۰ پرحجم": 200}[universe]
+    chosen_trades = [t for t in all_chosen if ranks.get(t["symbol"], 10**9) <= limit_rank]
+else:
+    chosen_trades = all_chosen
+
 account = simulate_account(chosen_trades, risk_percent, daily_limit, int(max_open))
 
 metric_columns = st.columns(5)
