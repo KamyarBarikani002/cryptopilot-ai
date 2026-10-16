@@ -1,18 +1,17 @@
 import json
-import requests
+
+from config.settings import SPOT_BASE_URL
+from src.binance_client import binance_get
 
 
 def get_btc_price():
 
-    url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+    data = binance_get(
+        SPOT_BASE_URL + "/api/v3/ticker/price",
+        params={"symbol": "BTCUSDT"}
+    )
 
-    response = requests.get(url)
-
-    data = response.json()
-
-    price = float(data["price"])
-
-    return price
+    return float(data["price"])
 
 
 def get_prices(asset_symbols):
@@ -26,15 +25,10 @@ def get_prices(asset_symbols):
 
     pairs = list(asset_symbols.values())
 
-    url = "https://api.binance.com/api/v3/ticker/price"
-
-    params = {
-        "symbols": json.dumps(pairs)
-    }
-
-    response = requests.get(url, params=params)
-
-    data = response.json()
+    data = binance_get(
+        SPOT_BASE_URL + "/api/v3/ticker/price",
+        params={"symbols": json.dumps(pairs, separators=(",", ":"))}
+    )
 
     price_by_pair = {
         item["symbol"]: float(item["price"])

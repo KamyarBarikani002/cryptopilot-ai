@@ -1,6 +1,7 @@
 import requests
 
 from config.settings import FUTURES_BASE_URL, FEAR_GREED_API_URL
+from src.binance_client import binance_get, REQUEST_TIMEOUT_SECONDS
 
 
 def get_funding_rate(symbol):
@@ -16,9 +17,7 @@ def get_funding_rate(symbol):
 
     params = {"symbol": symbol}
 
-    response = requests.get(url, params=params)
-
-    data = response.json()
+    data = binance_get(url, params=params)
 
     return float(data["lastFundingRate"]) * 100
 
@@ -36,9 +35,7 @@ def get_open_interest_trend(symbol, period="1h", lookback=6):
 
     params = {"symbol": symbol, "period": period, "limit": lookback}
 
-    response = requests.get(url, params=params)
-
-    data = response.json()
+    data = binance_get(url, params=params)
 
     if not isinstance(data, list) or len(data) < 2:
         return 0.0
@@ -61,7 +58,7 @@ def get_fear_greed_index():
     (نه به‌ازای هر ارز، چون این شاخص مربوط به کل بازار است نه یک ارز خاص).
     """
 
-    response = requests.get(FEAR_GREED_API_URL, params={"limit": 1})
+    response = requests.get(FEAR_GREED_API_URL, params={"limit": 1}, timeout=REQUEST_TIMEOUT_SECONDS)
 
     data = response.json()
 

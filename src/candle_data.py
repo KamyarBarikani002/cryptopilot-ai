@@ -1,16 +1,14 @@
-import requests
+from config.settings import SPOT_BASE_URL
+from src.binance_client import binance_get
 
 
 def get_btc_candles():
 
-    url = "https://api.binance.com/api/v3/klines"
-
-    params = {
-        "symbol": "BTCUSDT",
-        "interval": "1h",
-        "limit": 100
-    }
-
-    response = requests.get(url, params=params)
-
-    return response.json()
+    return binance_get(
+        SPOT_BASE_URL + "/api/v3/klines",
+        params={
+            "symbol": "BTCUSDT",
+            "interval": "1h",
+            "limit": 100
+        }
+    )

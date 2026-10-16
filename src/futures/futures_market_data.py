@@ -1,7 +1,7 @@
 import json
-import requests
 
 from config.settings import FUTURES_BASE_URL
+from src.binance_client import binance_get
 
 
 def get_top_symbols_by_volume(top_n, quote_asset="USDT"):
@@ -12,9 +12,7 @@ def get_top_symbols_by_volume(top_n, quote_asset="USDT"):
 
     url = FUTURES_BASE_URL + "/fapi/v1/ticker/24hr"
 
-    response = requests.get(url)
-
-    data = response.json()
+    data = binance_get(url)
 
     perpetual_pairs = [
         item
@@ -44,9 +42,7 @@ def get_futures_klines(symbol, interval, limit=100):
         "limit": limit
     }
 
-    response = requests.get(url, params=params)
-
-    return response.json()
+    return binance_get(url, params=params)
 
 
 def get_futures_prices(symbols):
@@ -64,9 +60,7 @@ def get_futures_prices(symbols):
         "symbols": json.dumps(list(symbols))
     }
 
-    response = requests.get(url, params=params)
-
-    data = response.json()
+    data = binance_get(url, params=params)
 
     return {
         item["symbol"]: float(item["price"])
