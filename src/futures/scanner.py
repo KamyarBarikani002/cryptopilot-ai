@@ -8,6 +8,8 @@ config/settings.py (SIGNAL_STRATEGY، تعریف‌ها در src/futures/strateg
 فاندینگ در پارامترها روشن باشد)؛ فقط در امتیاز اطمینان و ترتیب نمایش اثر دارد.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 from config.settings import (
     FUTURES_TAKER_FEE_PERCENT,
     INITIAL_CAPITAL,
@@ -31,8 +33,12 @@ from src.futures.futures_market_data import (
     get_futures_klines,
     get_tick_size,
     get_top_symbols_by_volume,
+    get_turnover_24h,
 )
 from src.futures.futures_risk import build_trade_plan
+
+
+SCAN_WORKERS = 8
 
 
 def closed_futures_klines(symbol, interval, limit):
@@ -57,6 +63,7 @@ def scan_symbol(
     fear_greed_value=50,
     tick_size_fetcher=get_tick_size,
     risk_percent=RISK_PER_TRADE_FUTURES,
+    turnover_fetcher=get_turnover_24h,
 ):
 
     """یک فرصت (dict) یا None اگر الان شرایط ورود برقرار نیست."""
@@ -122,6 +129,7 @@ def scan_symbol(
         "volatility_percent": signal["atr_percent"],
     }
     opportunity.update(plan)
+    opportunity["turnover_24h"] = _safe(turnover_fetcher, symbol, 0.0)
 
     return opportunity
 
@@ -136,6 +144,7 @@ def scan_market(
     fear_greed_fetcher=get_fear_greed_index,
     tick_size_fetcher=get_tick_size,
     risk_percent=None,
+    turnover_fetcher=get_turnover_24h,
 ):
     """
     همه‌ی fetcher ها قابل تزریق‌اند تا تست و حالت آزمایشی بدون اتصال به کوکوین
@@ -151,20 +160,23 @@ def scan_market(
     except Exception:
         fear_greed_value = 50  # مقدار خنثی در صورت عدم دسترسی به این سرویس
 
-    opportunities = []
-    skipped = []
+    risk = risk_percent if risk_percent is not None else RISK_PER_TRADE_FUTURES
 
-    for symbol in symbols:
+    def scan_one(symbol):
         try:
-            opportunity = scan_symbol(
+            return scan_symbol(
                 symbol, capital, kline_fetcher, funding_fetcher, oi_fetcher,
-                fear_greed_value, tick_size_fetcher,
-                risk_percent if risk_percent is not None else RISK_PER_TRADE_FUTURES,
-            )
-            if opportunity is not None:
-                opportunities.append(opportunity)
+                fear_greed_value, tick_size_fetcher, risk, turnover_fetcher,
+            ), None
         except Exception as error:
-            skipped.append({"symbol": symbol, "error": str(error)})
+            return None, {"symbol": symbol, "error": str(error)}
+
+    # همه‌ی ارزهای کوکوین (۴۰۰+) یکی‌یکی چند دقیقه طول می‌کشید؛ چند تا همزمان
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        outcomes = list(pool.map(scan_one, symbols))
+
+    opportunities = [o for o, _ in outcomes if o is not None]
+    skipped = [e for _, e in outcomes if e is not None]
 
     longs = sorted([o for o in opportunities if o["direction"] == "LONG"], key=lambda o: o["confidence"], reverse=True)
     shorts = sorted([o for o in opportunities if o["direction"] == "SHORT"], key=lambda o: o["confidence"], reverse=True)

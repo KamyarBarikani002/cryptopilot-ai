@@ -11,7 +11,7 @@ from src.db.models import PanelSettings
 
 DEFAULT_PANEL_SETTINGS = {
     "demo_mode": False,
-    "top_n": SCAN_TOP_N,
+    "top_n": 0,   # ۰ یعنی همه‌ی ارزهای کوکوین
     "capital": int(INITIAL_CAPITAL),
     "auto_refresh_enabled": False,
     "refresh_minutes": 15,

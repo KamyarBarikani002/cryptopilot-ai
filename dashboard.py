@@ -13,7 +13,8 @@ from src.futures.demo_data import (
     demo_funding_rate,
     demo_open_interest_trend,
     demo_fear_greed_index,
-    demo_tick_size
+    demo_tick_size,
+    demo_turnover_24h
 )
 from src.price_format import format_price
 from src.futures.futures_market_data import get_futures_prices
@@ -87,13 +88,22 @@ with st.sidebar:
         help="برای دیدن ظاهر پنل بدون اینترنت یا برای تست سریع."
     )
 
-    top_n = st.slider(
-        "چند ارز پرحجم فیوچرز بررسی شود؟",
+    scan_all = st.checkbox(
+        "همه‌ی ارزهای فیوچرز کوکوین",
+        value=int(_saved["top_n"]) == 0,
+        help="همه‌ی قراردادهای دائمی USDT کوکوین (۴۰۰+). اسکن حدود یک دقیقه طول می‌کشد."
+    )
+
+    top_n_choice = st.slider(
+        "یا فقط چند ارز پرحجم؟",
         min_value=5,
         max_value=100,
-        value=int(_saved["top_n"]),
-        step=5
+        value=int(_saved["top_n"]) or 30,
+        step=5,
+        disabled=scan_all
     )
+
+    top_n = 0 if scan_all else top_n_choice
 
     capital = st.number_input(
         "سرمایه فرضی برای محاسبه حجم پوزیشن ($)",
@@ -206,7 +216,7 @@ if scan_clicked or should_auto_scan:
             if demo_mode:
 
                 result = scan_market(
-                    top_n=top_n,
+                    top_n=top_n or None,
                     capital=capital,
                     symbol_fetcher=demo_top_symbols,
                     kline_fetcher=demo_klines,
@@ -214,13 +224,14 @@ if scan_clicked or should_auto_scan:
                     oi_fetcher=demo_open_interest_trend,
                     fear_greed_fetcher=demo_fear_greed_index,
                     tick_size_fetcher=demo_tick_size,
-                    risk_percent=risk_percent
+                    risk_percent=risk_percent,
+                    turnover_fetcher=demo_turnover_24h
                 )
 
             else:
 
                 result = scan_market(
-                    top_n=top_n,
+                    top_n=top_n or None,
                     capital=capital,
                     risk_percent=risk_percent
                 )
@@ -311,6 +322,23 @@ tab_long, tab_short, tab_history = st.tabs([
 ])
 
 
+LOW_VOLUME_USD = 1_000_000
+
+
+def _volume_label(turnover):
+
+    """حجم معاملات ۲۴ ساعته؛ زیر ۱ میلیون دلار هشدار می‌دهد (اسلیپیج و اسپرد زیاد)."""
+
+    if turnover >= 1_000_000_000:
+        text = format(turnover / 1_000_000_000, ".1f") + "B$"
+    elif turnover >= 1_000_000:
+        text = format(turnover / 1_000_000, ".1f") + "M$"
+    else:
+        text = format(turnover / 1_000, ".0f") + "K$"
+
+    return ("⚠️ کم‌حجم " if turnover < LOW_VOLUME_USD else "") + text
+
+
 def render_table(opportunities, direction_label):
 
     if not opportunities:
@@ -334,6 +362,7 @@ def render_table(opportunities, direction_label):
             "ریسک ($)": o["risk_amount_usd"],
             "کیفیت ستاپ": o["technical_score"],
             "امتیاز فاندامنتال": o["fundamental_score"],
+            "حجم ۲۴ ساعته": _volume_label(o.get("turnover_24h") or 0),
             "ADX": o["adx"],
             "RSI": o["rsi"],
             "فاندینگ (٪)": o["funding_rate_percent"],

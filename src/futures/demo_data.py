@@ -101,6 +101,12 @@ def demo_tick_size(symbol):
     return None
 
 
+def demo_turnover_24h(symbol):
+
+    # یکی کم‌حجم، تا هشدار «کم‌حجم» هم در دمو دیده شود
+    return 400_000.0 if symbol == "NEARUSDTM" else 250_000_000.0
+
+
 def demo_klines(symbol, interval, limit=500):
 
     """

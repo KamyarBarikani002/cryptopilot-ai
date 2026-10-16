@@ -12,6 +12,8 @@
 این تابع data را همان‌طور برمی‌گرداند و فراخوان باید None را بررسی کند.
 """
 
+import time
+
 import requests
 
 REQUEST_TIMEOUT_SECONDS = 15
@@ -22,16 +24,33 @@ class ExchangeUnavailable(RuntimeError):
     """صرافی درخواست را رد کرد، خطا داد، یا جواب نداد."""
 
 
+RETRY_STATUS = (429, 500, 502, 503, 504)
+RETRY_WAITS_SECONDS = (1, 2, 4)
+
+
 def kucoin_get(url, params=None):
 
     host = url.split("/")[2]
 
-    try:
-        response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
-    except requests.RequestException as error:
-        raise ExchangeUnavailable(
-            "اتصال به کوکوین برقرار نشد (" + type(error).__name__ + "، " + host + ")."
-        ) from error
+    # وقتی همه‌ی ارزهای کوکوین اسکن می‌شوند، گاهی کوکوین «درخواست زیاد» (429)
+    # برمی‌گرداند؛ چند بار با مکث بیشتر دوباره تلاش می‌شود.
+    for wait in RETRY_WAITS_SECONDS + (None,):
+
+        try:
+            response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+        except requests.RequestException as error:
+            if wait is not None:
+                time.sleep(wait)
+                continue
+            raise ExchangeUnavailable(
+                "اتصال به کوکوین برقرار نشد (" + type(error).__name__ + "، " + host + ")."
+            ) from error
+
+        if response.status_code in RETRY_STATUS and wait is not None:
+            time.sleep(wait)
+            continue
+
+        break
 
     if response.status_code in (403, 451):
         raise ExchangeUnavailable(

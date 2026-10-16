@@ -273,3 +273,23 @@ def test_backtest_page_shows_trades_and_equity_curve():
     summary = at.dataframe[0].value
     assert summary["معاملات"].iloc[0] >= 1
     assert any("منحنی سرمایه" in h.value for h in at.subheader)
+
+
+def test_rate_limit_is_retried_then_succeeds():
+    from src.exchange_client import kucoin_get
+    busy = mock.Mock(status_code=429)
+    busy.json.return_value = {"code": "429000", "msg": "Too many requests"}
+    ok = mock.Mock(status_code=200)
+    ok.json.return_value = {"code": "200000", "data": [1]}
+    with mock.patch("requests.get", side_effect=[busy, busy, ok]) as get:
+        assert kucoin_get("https://api-futures.kucoin.com/api/v1/contracts/active") == [1]
+    assert get.call_count == 3
+
+
+def test_scan_all_contracts():
+    from src.futures.futures_market_data import get_top_symbols_by_volume
+    from src.futures.scanner import scan_market
+    assert len(get_top_symbols_by_volume(None)) == 6          # every scannable contract, traps excluded
+    result = scan_market(top_n=None, capital=200)
+    assert result["scanned"] == 6 and not result["skipped"]
+    assert all(o["turnover_24h"] > 0 for o in result["longs"] + result["shorts"])

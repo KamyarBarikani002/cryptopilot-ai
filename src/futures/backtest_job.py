@@ -10,6 +10,9 @@
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import numpy as np
 
 from config.settings import FUTURES_TAKER_FEE_PERCENT, REWARD_RISK_RATIO
 from src.futures.backtest import backtest_symbol
@@ -69,6 +72,28 @@ class BacktestJob:
         except Exception as error:
             self._set(status="error", error=str(error) + "\n" + traceback.format_exc(limit=3))
 
+    def _load(self, symbol, start_ms, end_ms, s, f):
+
+        """
+        تاریخچه‌ی یک ارز. برای اینکه ۴۰۰+ ارز در حافظه‌ی سرور جا شوند، کندل‌ها
+        فشرده (numpy) نگه داشته می‌شوند و فقط موقع بک‌تست به لیست تبدیل می‌شوند.
+        """
+
+        key = (symbol, start_ms, end_ms, s["use_funding"])
+        problems = []
+
+        if key not in self._history_cache:
+            candles = f["klines"](symbol, "1h", start_ms, end_ms)
+            funding = []
+            if s["use_funding"]:
+                try:
+                    funding = f["funding"](symbol, start_ms, end_ms)
+                except Exception as error:
+                    problems.append(symbol + " (فاندینگ): " + str(error))
+            self._history_cache[key] = (np.asarray(candles, dtype=np.float64), funding, f["tick"](symbol))
+
+        return self._history_cache[key], problems
+
     def _compute(self, s, f):
 
         started = time.time()
@@ -76,48 +101,51 @@ class BacktestJob:
         start_ms = end_ms - (s["days"] * 24 + WARMUP_CANDLES) * HOUR_MS
 
         symbols = f["symbols"](s["top_n"])
-        loaded, failed, timings = {}, [], {}
+        failed, timings = [], {}
+        results = {label: [] for label, _, _ in STRATEGY_VARIANTS}
+        done = 0
 
-        for k, symbol in enumerate(symbols):
-
-            self._set(progress=k / max(len(symbols), 1) * 0.9, message="دانلود " + symbol)
+        def work(symbol):
             t0 = time.time()
-            key = (symbol, start_ms, end_ms, s["use_funding"])
-
-            try:
-                if key not in self._history_cache:
-                    candles = f["klines"](symbol, "1h", start_ms, end_ms)
-                    funding = []
-                    if s["use_funding"]:
-                        try:
-                            funding = f["funding"](symbol, start_ms, end_ms)
-                        except Exception as error:
-                            failed.append(symbol + " (فاندینگ): " + str(error))
-                    self._history_cache[key] = (candles, funding, f["tick"](symbol))
-                loaded[symbol] = self._history_cache[key]
-            except Exception as error:
-                failed.append(symbol + ": " + str(error))
-
-            timings[symbol] = round(time.time() - t0, 1)
-
-        self._set(progress=0.92, message="اجرای بک‌تست...")
-
-        results = []
-        for label, name, params in STRATEGY_VARIANTS:
-            trades = []
-            for symbol, (candles, funding, tick) in loaded.items():
-                trades += backtest_symbol(
-                    symbol, candles, name, params,
+            (candles, funding, tick), problems = self._load(symbol, start_ms, end_ms, s, f)
+            rows = [[int(c[0])] + list(c[1:]) for c in candles.tolist()]
+            per_variant = {
+                label: backtest_symbol(
+                    symbol, rows, name, params,
                     funding_points=funding,
                     min_reward_risk=REWARD_RISK_RATIO, fee_percent=FUTURES_TAKER_FEE_PERCENT,
                     max_hold=s["max_hold"], tick_size=tick,
                 )
-            results.append((label, trades))
+                for label, name, params in STRATEGY_VARIANTS
+            } if len(rows) else {}
+            return per_variant, problems, round(time.time() - t0, 1)
+
+        # چند ارز همزمان (کوکوین درخواست‌های عمومی را محدود می‌کند؛ ۶ تا امن است)
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = {pool.submit(work, symbol): symbol for symbol in symbols}
+            for future in as_completed(futures):
+                symbol = futures[future]
+                try:
+                    per_variant, problems, seconds = future.result()
+                    for label, trades in per_variant.items():
+                        results[label] += trades
+                    failed += problems
+                    timings[symbol] = seconds
+                except Exception as error:
+                    failed.append(symbol + ": " + str(error))
+                done += 1
+                self._set(
+                    progress=done / max(len(symbols), 1),
+                    message=str(done) + " از " + str(len(symbols)) + " ارز — آخرین: " + symbol,
+                )
+
+        results = [(label, results[label]) for label, _, _ in STRATEGY_VARIANTS]
+        loaded = [sym for sym in symbols if sym in timings]
 
         return {
             "results": results,
             "failed": failed,
-            "symbols": list(loaded),
+            "symbols": loaded,
             "settings": dict(s),
             "seconds": round(time.time() - started),
             "timings": timings,

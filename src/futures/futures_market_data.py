@@ -67,6 +67,7 @@ def get_top_symbols_by_volume(top_n, quote_asset="USDT"):
 
     """
     پرحجم‌ترین قراردادهای فیوچرز دائمی بر اساس گردش معاملات ۲۴ ساعته (به دلار).
+    top_n = None یا 0 یعنی همه‌ی قراردادهای قابل اسکن کوکوین.
     """
 
     contracts = get_active_contracts(max_age_seconds=0)
@@ -82,7 +83,19 @@ def get_top_symbols_by_volume(top_n, quote_asset="USDT"):
         reverse=True
     )
 
-    return [contract["symbol"] for contract in eligible[:top_n]]
+    if top_n:
+        eligible = eligible[:top_n]
+
+    return [contract["symbol"] for contract in eligible]
+
+
+def get_turnover_24h(symbol):
+
+    """گردش معاملات ۲۴ ساعته‌ی قرارداد به دلار (برای تشخیص ارزهای کم‌حجم)."""
+
+    contract = get_active_contracts().get(symbol) or {}
+
+    return float(contract.get("turnoverOf24h") or 0)
 
 
 def get_futures_klines(symbol, interval, limit=100, closed_only=False):

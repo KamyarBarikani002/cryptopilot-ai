@@ -63,8 +63,12 @@ state = job.snapshot()
 
 with st.form("backtest_form"):
 
+    scan_all = st.checkbox(
+        "همه‌ی ارزهای فیوچرز کوکوین (۴۰۰+، حدود ۱۰ دقیقه)", value=True,
+        help="اگر خاموش باشد، فقط پرحجم‌ترین‌ها به تعداد انتخاب‌شده بررسی می‌شوند."
+    )
     columns = st.columns(4)
-    top_n = columns[0].slider("تعداد ارزهای پرحجم", 5, 60, 30, step=5)
+    top_n = columns[0].slider("یا فقط چند ارز پرحجم", 5, 100, 30, step=5)
     days = columns[1].slider("چند روز گذشته", 30, 180, 180, step=30)
     max_hold = columns[2].slider("حداکثر نگه‌داری (ساعت)", 12, 168, 72, step=12)
     use_funding = columns[3].checkbox("فیلتر فاندینگ تاریخی", value=True)
@@ -74,7 +78,7 @@ with st.form("backtest_form"):
 
 if run:
     job.start(
-        {"top_n": top_n, "days": days, "max_hold": max_hold, "use_funding": use_funding},
+        {"top_n": 0 if scan_all else top_n, "days": days, "max_hold": max_hold, "use_funding": use_funding},
         {
             "symbols": get_top_symbols_by_volume,
             "klines": get_futures_klines_range,
