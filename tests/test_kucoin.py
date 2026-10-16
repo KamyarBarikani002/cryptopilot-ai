@@ -145,10 +145,13 @@ def test_pepe_prices_keep_their_decimals():
 def test_the_still_open_candle_is_ignored(kucoin):
     from src.futures.futures_market_data import get_futures_klines
     now_ms = int(time.time() * 1000)
-    open_candle = [now_ms // 3_600_000 * 3_600_000, 1, 2, 0.5, 1.5, 10, 1]
-    with mock.patch("fake_kucoin.futures_klines_oldest_first", lambda s, n=500: [[1, 1, 1, 1, 1, 1, 1], open_candle]):
+    this_hour = now_ms // 3_600_000 * 3_600_000
+    closed = [this_hour - 3_600_000, 1, 1, 1, 1, 1, 1]
+    open_candle = [this_hour, 1, 2, 0.5, 1.5, 10, 1]
+    with mock.patch("fake_kucoin.futures_klines_oldest_first", lambda s, n=500: [closed, open_candle]):
         assert len(get_futures_klines("XBTUSDTM", "1h", 100)) == 2
-        assert get_futures_klines("XBTUSDTM", "1h", 100, closed_only=True) == [[1, 1.0, 1.0, 1.0, 1.0, 1.0]]
+        assert get_futures_klines("XBTUSDTM", "1h", 100, closed_only=True) == [
+            [this_hour - 3_600_000, 1.0, 1.0, 1.0, 1.0, 1.0]]
 
 
 # ---------------- error handling ----------------
@@ -335,3 +338,14 @@ def test_history_with_a_hole_is_refetched_or_rejected():
         with mock.patch("requests.get", side_effect=fake({})):
             with pytest.raises(ExchangeUnavailable, match="ناقص"):
                 get_futures_klines_range("X", "1h", start, end)
+
+
+def test_more_than_200_candles_are_fetched_in_pages(kucoin):
+    # KuCoin returns at most 200 candles per request; 500 must come back complete
+    from src.futures.futures_market_data import get_futures_klines
+    candles = get_futures_klines("XBTUSDTM", "1h", 450, closed_only=True)
+    times = [c[0] for c in candles]
+    assert len(candles) == 450
+    assert all(b - a == 3_600_000 for a, b in zip(times, times[1:])), "no holes"
+    kline_calls = [c for c in kucoin if c[0].endswith("/kline/query")]
+    assert len(kline_calls) >= 3

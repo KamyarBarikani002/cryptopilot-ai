@@ -98,6 +98,12 @@ def get_turnover_24h(symbol):
     return float(contract.get("turnoverOf24h") or 0)
 
 
+# کوکوین در هر درخواست کندل فیوچرز حداکثر ۲۰۰ کندل برمی‌گرداند (نه ۵۰۰).
+# بازه‌های بلندتر باید تکه‌تکه گرفته شوند، وگرنه وسط داده جای خالی می‌افتد.
+KUCOIN_MAX_KLINES = 200
+KLINE_PAGE_CANDLES = 190
+
+
 def get_futures_klines(symbol, interval, limit=100, closed_only=False):
 
     """کندل‌ها به شکل استاندارد [time_ms, open, high, low, close, volume]، قدیم به جدید."""
@@ -105,6 +111,11 @@ def get_futures_klines(symbol, interval, limit=100, closed_only=False):
     granularity = _GRANULARITY_MINUTES[interval]
     now_ms = int(time.time() * 1000)
     from_ms = now_ms - granularity * 60_000 * (limit + 1)
+
+    if limit + 1 > KLINE_PAGE_CANDLES:
+        # بیشتر از سقف یک درخواست: چند تکه
+        candles = get_futures_klines_range(symbol, interval, from_ms, now_ms, pause_seconds=0)
+        return candles[-limit:]
 
     rows = kucoin_get(
         KUCOIN_FUTURES_URL + "/api/v1/kline/query",
@@ -200,7 +211,7 @@ def get_futures_klines_range(symbol, interval, start_ms, end_ms, pause_seconds=0
 
     granularity = _GRANULARITY_MINUTES[interval]
     step_ms = granularity * 60_000
-    page_ms = step_ms * 450
+    page_ms = step_ms * KLINE_PAGE_CANDLES
     rows = {}
     cursor = start_ms
 

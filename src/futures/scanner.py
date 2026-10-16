@@ -68,9 +68,11 @@ def scan_symbol(
 
     """یک فرصت (dict) یا None اگر الان شرایط ورود برقرار نیست."""
 
-    candles = kline_fetcher(symbol, SCAN_INTERVAL, SCAN_CANDLES)
-
     needed = strategy.MIN_CANDLES_BY_STRATEGY[SIGNAL_STRATEGY]
+
+    # فقط به اندازه‌ای که استراتژی لازم دارد (کوکوین هر بار ۲۰۰ کندل می‌دهد؛
+    # برای ۵۰۰+ ارز هر درخواست اضافه یعنی اسکن کندتر)
+    candles = kline_fetcher(symbol, SCAN_INTERVAL, min(SCAN_CANDLES, needed + 40))
 
     if len(candles) < needed:
         raise ValueError(

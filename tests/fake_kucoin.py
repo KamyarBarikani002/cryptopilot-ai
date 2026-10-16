@@ -59,7 +59,7 @@ def futures_klines_oldest_first(symbol, n=500):
     # "up" symbols give a Long, the others the mirror image (a Short).
     from src.futures.demo_data import synthetic_candles
     now_ms = int(time.time() * 1000)
-    end_ms = now_ms // 14_400_000 * 14_400_000          # a 4h boundary in the past
+    end_ms = now_ms // 3_600_000 * 3_600_000            # the last candle has just closed
     start_ms = end_ms - n * 3_600_000
     up = symbol in ("XBTUSDTM", "SOLUSDTM", "XRPUSDTM")
     from config.settings import SIGNAL_STRATEGY
@@ -95,7 +95,10 @@ def fake_get(url, params=None, timeout=None):
     if url == "https://api-futures.kucoin.com/api/v1/contracts/active":
         return ok(CONTRACTS)
     if url == "https://api-futures.kucoin.com/api/v1/kline/query":
-        return ok(futures_klines_oldest_first(params["symbol"]))
+        # like the real API: only candles inside [from, to], and at most 200 of them
+        rows = [r for r in futures_klines_oldest_first(params["symbol"])
+                if params["from"] <= r[0] <= params["to"]]
+        return ok(rows[-200:])
     if url == "https://api-futures.kucoin.com/api/v1/contract/funding-rates":
         return ok([{"symbol": params["symbol"], "fundingRate": 0.0001, "timepoint": params["from"] + 8 * 3_600_000}])
     if url == "https://api.kucoin.com/api/ua/v1/market/open-interest":
