@@ -1,5 +1,6 @@
 import time
 
+import pandas as pd
 import streamlit as st
 
 from src.auth import require_login
@@ -140,7 +141,7 @@ label, main_trades = report["results"][0]
 if main_trades:
 
     st.subheader("منحنی سرمایه — " + label)
-    st.line_chart(equity_curve(main_trades), x="time", y="equity_r")
+    st.line_chart(pd.DataFrame(equity_curve(main_trades)), x="time", y="equity_r")
 
     st.subheader("به تفکیک ارز")
     per_symbol = {}

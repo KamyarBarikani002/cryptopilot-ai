@@ -254,3 +254,18 @@ def test_backtest_page_runs():
     assert any("مقایسه" in h.value for h in at.subheader)
     summary = at.dataframe[0].value
     assert list(summary["استراتژی"])[0].startswith("نسخه‌ی جدید")
+
+
+def test_backtest_page_shows_trades_and_equity_curve():
+    from test_signals import _candles_after_signal
+    import streamlit as st
+    st.cache_resource.clear()     # fresh background job: no history cached by the other test
+    up = _candles_after_signal("up", [(1.001, 0.999), (1.2, 0.999)])
+    with mock.patch("src.futures.futures_market_data.get_futures_klines_range", lambda *a, **k: up):
+        at = _app("pages/2_Backtest.py")
+        at.run(timeout=60)
+        at.button[0].click().run(timeout=120)
+    assert not at.exception, at.exception
+    summary = at.dataframe[0].value
+    assert summary["معاملات"].iloc[0] >= 1
+    assert any("منحنی سرمایه" in h.value for h in at.subheader)
