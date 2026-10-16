@@ -256,8 +256,10 @@ def test_backtest_page_runs():
     assert not at.exception, at.exception
     assert not at.error, [e.value for e in at.error]
     assert any("مقایسه" in h.value for h in at.subheader)
-    summary = at.dataframe[0].value
+    summary = at.table[0].value
     assert list(summary["استراتژی"])[0].startswith("خرید افت")
+    assert len(summary) == 13, "the broad search compares 13 variants by default"
+    assert any("به هدف نزدیک‌تر" in h.value for h in at.subheader)
 
 
 def test_backtest_page_shows_trades_and_equity_curve():
@@ -270,8 +272,10 @@ def test_backtest_page_shows_trades_and_equity_curve():
         at.run(timeout=60)
         at.button[0].click().run(timeout=120)
     assert not at.exception, at.exception
-    summary = at.dataframe[0].value
+    summary = at.table[0].value
     assert summary["معاملات"].iloc[0] >= 1
+    goal = at.table[1].value
+    assert "ریسک لازم برای ۱۰٪" in goal.columns
     assert any("منحنی سرمایه" in h.value for h in at.subheader)
 
 

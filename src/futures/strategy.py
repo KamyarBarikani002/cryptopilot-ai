@@ -320,12 +320,103 @@ def dip_signal_at(data, i, funding_percent=None, params=None):
     }
 
 
-SIGNAL_FUNCTIONS = {"pullback": signal_at, "dip": dip_signal_at}
-MIN_CANDLES_BY_STRATEGY = {"pullback": MIN_CANDLES, "dip": DIP_MIN_CANDLES}
+# ---------------------------------------------------------------------------
+# استراتژی «شکست سقف/کف» (Donchian breakout، روندگیر کلاسیک)
+# ---------------------------------------------------------------------------
+#
+# Long: کندل بالای بالاترین سقف N کندل قبل بسته شود، قیمت بالای EMA200 باشد
+# (روند بلندمدت صعودی)، روند قوی باشد (ADX) و حجم کندل کمتر از معمول نباشد.
+# Short برعکس. حد ضرر چند برابر ATR زیر ورود.
+
+BREAKOUT_DEFAULT_PARAMS = {
+    "lookback": 48,
+    "use_ema200_filter": True,
+    "adx_min": 20,
+    "stop_atr": 2.0,
+    "volume_ratio_min": 1.0,
+    "use_funding_filter": True,
+    "funding_crowded_percent": 0.05,
+}
+
+BREAKOUT_MIN_CANDLES = 220
+
+
+def breakout_signal_at(data, i, funding_percent=None, params=None):
+
+    p = {**BREAKOUT_DEFAULT_PARAMS, **(params or {})}
+    n = p["lookback"]
+
+    if i < max(n + 1, BREAKOUT_MIN_CANDLES - 1):
+        return None
+
+    close = data["close"][i]
+    atr = data["atr"][i]
+    ema200 = data["ema200"][i]
+    adx = data["adx"][i]
+    volume_sma = data["volume_sma"][i]
+
+    if not atr or ema200 is None or adx is None:
+        return None
+
+    highest = max(data["high"][i - n:i])
+    lowest = min(data["low"][i - n:i])
+    # فقط اولین کندلی که شکست را می‌سازد (کندل قبلی هنوز داخل کانال بسته شده بود)
+    previous_highest = max(data["high"][i - n - 1:i - 1])
+    previous_lowest = min(data["low"][i - n - 1:i - 1])
+
+    if close > highest and data["close"][i - 1] <= previous_highest:
+        direction = "LONG"
+    elif close < lowest and data["close"][i - 1] >= previous_lowest:
+        direction = "SHORT"
+    else:
+        return None
+
+    up = direction == "LONG"
+
+    if p["use_ema200_filter"] and ((up and close <= ema200) or (not up and close >= ema200)):
+        return None
+
+    if p["adx_min"] is not None and adx < p["adx_min"]:
+        return None
+
+    if volume_sma and data["volume"][i] < p["volume_ratio_min"] * volume_sma:
+        return None
+
+    if p["use_funding_filter"] and funding_percent is not None:
+        if up and funding_percent > p["funding_crowded_percent"]:
+            return None
+        if not up and funding_percent < -p["funding_crowded_percent"]:
+            return None
+
+    stop = close - p["stop_atr"] * atr if up else close + p["stop_atr"] * atr
+
+    if stop <= 0:
+        return None
+
+    volume_boost = min(max((data["volume"][i] / volume_sma - 1) / 2, 0), 1) * 40 if volume_sma else 20
+    strength = round(40 + min(max((adx - 20) / 20, 0), 1) * 20 + volume_boost)
+
+    return {
+        "direction": direction,
+        "entry": close,
+        "stop": stop,
+        "strength": strength,
+        "adx": round(adx, 1),
+        "rsi": round(data["rsi"][i], 1) if data["rsi"][i] is not None else None,
+        "atr_percent": round(atr / close * 100, 3),
+        "trend_4h": data["trend_4h"][i],
+    }
+
+
+SIGNAL_FUNCTIONS = {"pullback": signal_at, "dip": dip_signal_at, "breakout": breakout_signal_at}
+MIN_CANDLES_BY_STRATEGY = {
+    "pullback": MIN_CANDLES, "dip": DIP_MIN_CANDLES, "breakout": BREAKOUT_MIN_CANDLES,
+}
 
 STRATEGY_TITLES = {
     "dip": "خرید افت در روند (MA20 + RSI)",
     "pullback": "پولبک در جهت روند (EMA + ADX)",
+    "breakout": "شکست سقف/کف در جهت روند (Donchian)",
 }
 
 

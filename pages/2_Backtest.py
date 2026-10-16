@@ -63,12 +63,18 @@ state = job.snapshot()
 
 with st.form("backtest_form"):
 
-    scan_all = st.checkbox(
-        "همه‌ی ارزهای فیوچرز کوکوین (۴۰۰+، حدود ۱۰ دقیقه)", value=True,
-        help="اگر خاموش باشد، فقط پرحجم‌ترین‌ها به تعداد انتخاب‌شده بررسی می‌شوند."
+    top_columns = st.columns(2)
+    universe_choice = top_columns[0].radio(
+        "کدام ارزها؟",
+        ["۲۰۰ ارز پرحجم", "۱۰۰ ارز پرحجم", "۳۰ ارز پرحجم", "همه‌ی ارزهای کوکوین (۵۰۰+)"],
+        help="بک‌تست قبلی نشان داد ارزهای خیلی کم‌حجم نتیجه را خراب می‌کنند؛ ۲۰۰ پرحجم تعادل خوبی است.",
+    )
+    variant_choice = top_columns[1].radio(
+        "چه چیزهایی مقایسه شود؟",
+        ["جست‌وجوی گسترده (۱۳ حالت، کندتر)", "مقایسه‌ی سریع (۴ حالت)"],
     )
     columns = st.columns(4)
-    top_n = columns[0].slider("یا فقط چند ارز پرحجم", 5, 100, 30, step=5)
+    columns[0].caption("بازه‌ی زمانی و نگه‌داری:")
     days = columns[1].slider("چند روز گذشته", 30, 180, 180, step=30)
     max_hold = columns[2].slider("حداکثر نگه‌داری (ساعت)", 12, 168, 72, step=12)
     use_funding = columns[3].checkbox("فیلتر فاندینگ تاریخی", value=True)
@@ -78,7 +84,11 @@ with st.form("backtest_form"):
 
 if run:
     job.start(
-        {"top_n": 0 if scan_all else top_n, "days": days, "max_hold": max_hold, "use_funding": use_funding},
+        {
+            "top_n": {"۲۰۰ ارز پرحجم": 200, "۱۰۰ ارز پرحجم": 100, "۳۰ ارز پرحجم": 30}.get(universe_choice, 0),
+            "days": days, "max_hold": max_hold, "use_funding": use_funding,
+            "variant_set": "research" if variant_choice.startswith("جست‌وجو") else "quick",
+        },
         {
             "symbols": get_top_symbols_by_volume,
             "klines": get_futures_klines_range,
@@ -138,13 +148,44 @@ for label, trades in report["results"]:
     })
 
 st.subheader("مقایسه")
-st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+st.table(summary_rows)
 st.caption(
     "«نیمه‌ی اول/دوم» نتیجه را جدا برای دو نیمه‌ی دوره نشان می‌دهد: استراتژی‌ای "
     "که فقط در یک نیمه سود داده، احتمالاً شانسی بوده. "
     "R یعنی مقدار ریسک هر معامله. با ریسک ۱٪ سرمایه در هر معامله، «مجموع ۱۰R» "
     "یعنی حدود ۱۰٪ سود و «بیشترین افت ۵R» یعنی در بدترین دوره حدود ۵٪ افت."
 )
+
+st.subheader("🎯 کدام استراتژی به هدف نزدیک‌تر است؟")
+st.caption(
+    "هر استراتژی روی یک حساب واقعی با ریسک ۰٫۵٪ در هر معامله، سقف ضرر روزانه‌ی ۱٫۵٪ "
+    "و حداکثر ۳ پوزیشن باز، جدا برای ارزهای پرحجم. «ریسک لازم برای ۱۰٪» یعنی با "
+    "همین تعداد و کیفیت سیگنال، ریسک هر معامله باید چقدر باشد تا ماهی ۱۰٪ دربیاید."
+)
+_ranks = {symbol: k + 1 for k, symbol in enumerate(report["symbols"])}
+_goal_rows = []
+for _label, _trades in report["results"]:
+    for _name, _limit in (("۳۰ پرحجم", 30), ("۱۰۰ پرحجم", 100), ("۲۰۰ پرحجم", 200), ("همه", 10**9)):
+        if _limit < 10**9 and _limit >= len(report["symbols"]) and _name != "۳۰ پرحجم":
+            continue
+        _subset = [t for t in _trades if _ranks.get(t["symbol"], 10**9) <= _limit]
+        if not _subset:
+            continue
+        _acc = simulate_account(_subset, 0.5, 1.5, 3)
+        _r_month = sum(t["r"] for t in _subset) / (report["settings"]["days"] / 30)
+        _goal_rows.append({
+            "استراتژی": _label,
+            "ارزها": _name,
+            "معامله در ماه": round(len(_subset) / (report["settings"]["days"] / 30), 1),
+            "R در ماه": round(_r_month, 2),
+            "سود ماهانه‌ی حساب (٪)": _acc["avg_month_percent"],
+            "ماه‌های ≥۱۰٪": str(_acc["months_at_least_10"]) + "/" + str(_acc["full_months"]),
+            "بیشترین افت (٪)": _acc["max_drawdown_percent"],
+            "ریسک لازم برای ۱۰٪": (format(10 / _r_month, ".1f") + "٪") if _r_month > 0 else "—",
+        })
+_goal_rows.sort(key=lambda row: row["سود ماهانه‌ی حساب (٪)"], reverse=True)
+st.table(_goal_rows[:15])
+
 
 def _equity_svg(points, width=900, height=220, pad=28):
 

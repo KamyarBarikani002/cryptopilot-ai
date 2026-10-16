@@ -20,14 +20,33 @@ from src.futures.backtest import backtest_symbol
 HOUR_MS = 3_600_000
 WARMUP_CANDLES = 300
 
-# اولین ردیف = استراتژی فعلی اسکنر. بقیه برای مقایسه‌اند.
-STRATEGY_VARIANTS = [
-    ("خرید افت در روند — استراتژی فعلی اسکنر", "dip", {}),
-    ("خرید افت + ADX ≥ 20", "dip", {"adx_min": 20}),
-    ("خرید افت، RSI 35/65 (سیگنال بیشتر)", "dip", {"rsi_low": 35, "rsi_high": 65}),
-    ("خرید افت، RSI 35/65 + ADX ≥ 20", "dip", {"rsi_low": 35, "rsi_high": 65, "adx_min": 20}),
-    ("پولبک در جهت روند (EMA + ADX)", "pullback", {}),
+# هر ردیف: (نام نمایشی، استراتژی، پارامترها، نسبت سود به ضرر). نسبت هیچ‌وقت کمتر
+# از ۱ به ۲ نیست (قانون مدیریت سرمایه). اولین ردیف = استراتژی فعلی اسکنر.
+QUICK_VARIANTS = [
+    ("خرید افت در روند — استراتژی فعلی اسکنر", "dip", {}, 2.0),
+    ("خرید افت + ADX ≥ 20", "dip", {"adx_min": 20}, 2.0),
+    ("شکست سقف/کف ۴۸ ساعته", "breakout", {}, 2.0),
+    ("پولبک در جهت روند (EMA + ADX)", "pullback", {}, 2.0),
 ]
+
+RESEARCH_VARIANTS = [
+    ("خرید افت در روند — استراتژی فعلی اسکنر", "dip", {}, 2.0),
+    ("خرید افت، RSI 25/75", "dip", {"rsi_low": 25, "rsi_high": 75}, 2.0),
+    ("خرید افت، RSI 35/65", "dip", {"rsi_low": 35, "rsi_high": 65}, 2.0),
+    ("خرید افت + ADX ≥ 20", "dip", {"adx_min": 20}, 2.0),
+    ("خرید افت، نسبت ۱ به ۳", "dip", {}, 3.0),
+    ("شکست ۲۴ ساعته", "breakout", {"lookback": 24}, 2.0),
+    ("شکست ۴۸ ساعته", "breakout", {}, 2.0),
+    ("شکست ۹۶ ساعته", "breakout", {"lookback": 96}, 2.0),
+    ("شکست ۴۸ ساعته، نسبت ۱ به ۳", "breakout", {}, 3.0),
+    ("شکست ۴۸ ساعته، بدون فیلتر EMA200", "breakout", {"use_ema200_filter": False}, 2.0),
+    ("شکست ۴۸ ساعته، حد ضرر ۱.۵ ATR", "breakout", {"stop_atr": 1.5}, 2.0),
+    ("پولبک در جهت روند", "pullback", {}, 2.0),
+    ("پولبک در جهت روند، نسبت ۱ به ۳", "pullback", {}, 3.0),
+]
+
+VARIANT_SETS = {"quick": QUICK_VARIANTS, "research": RESEARCH_VARIANTS}
+STRATEGY_VARIANTS = QUICK_VARIANTS   # نام قدیمی، برای سازگاری
 
 
 class BacktestJob:
@@ -100,9 +119,10 @@ class BacktestJob:
         end_ms = int(started // 3600 * 3600 * 1000)
         start_ms = end_ms - (s["days"] * 24 + WARMUP_CANDLES) * HOUR_MS
 
+        variants = VARIANT_SETS[s.get("variant_set", "quick")]
         symbols = f["symbols"](s["top_n"])
         failed, timings = [], {}
-        results = {label: [] for label, _, _ in STRATEGY_VARIANTS}
+        results = {label: [] for label, _, _, _ in variants}
         done = 0
 
         def work(symbol):
@@ -113,10 +133,10 @@ class BacktestJob:
                 label: backtest_symbol(
                     symbol, rows, name, params,
                     funding_points=funding,
-                    min_reward_risk=REWARD_RISK_RATIO, fee_percent=FUTURES_TAKER_FEE_PERCENT,
+                    min_reward_risk=max(rr, REWARD_RISK_RATIO), fee_percent=FUTURES_TAKER_FEE_PERCENT,
                     max_hold=s["max_hold"], tick_size=tick,
                 )
-                for label, name, params in STRATEGY_VARIANTS
+                for label, name, params, rr in variants
             } if len(rows) else {}
             return per_variant, problems, round(time.time() - t0, 1)
 
@@ -139,7 +159,7 @@ class BacktestJob:
                     message=str(done) + " از " + str(len(symbols)) + " ارز — آخرین: " + symbol,
                 )
 
-        results = [(label, results[label]) for label, _, _ in STRATEGY_VARIANTS]
+        results = [(label, results[label]) for label, _, _, _ in variants]
         loaded = [sym for sym in symbols if sym in timings]
 
         return {

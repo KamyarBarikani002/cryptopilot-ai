@@ -188,3 +188,24 @@ def test_half_split():
     trades = [{"opened": "2026-01-01 00:00"}, {"opened": "2026-03-01 00:00"}]
     first, second = backtest.split_halves(trades, "2026-02-01 00:00")
     assert first == trades[:1] and second == trades[1:]
+
+
+def test_breakout_takes_only_the_first_breaking_candle():
+    candles = synthetic_candles("up", n=600)
+    data = strategy.compute_indicators(candles)
+    hits = [i for i in range(220, 600) if strategy.breakout_signal_at(data, i)]
+    assert hits, "an uptrend makes new highs"
+    for i in hits:
+        s = strategy.breakout_signal_at(data, i)
+        assert s["direction"] == "LONG" and s["stop"] < s["entry"]
+        assert data["close"][i] > max(data["high"][i - 48:i])
+        assert data["close"][i - 1] <= max(data["high"][i - 49:i - 1])
+    flat = strategy.compute_indicators(synthetic_candles("flat", n=600))
+    assert not [i for i in range(220, 600) if strategy.breakout_signal_at(flat, i)]
+    assert strategy.breakout_signal_at(data, hits[0], funding_percent=0.09) is None
+
+
+def test_research_variants_never_go_below_one_to_two():
+    from src.futures.backtest_job import RESEARCH_VARIANTS, QUICK_VARIANTS
+    assert all(rr >= 2 for _, _, _, rr in RESEARCH_VARIANTS + QUICK_VARIANTS)
+    assert RESEARCH_VARIANTS[0][1] == "dip" and QUICK_VARIANTS[0][1] == "dip"

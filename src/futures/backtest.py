@@ -28,10 +28,12 @@ STRATEGIES = {
     "pullback": strategy.signal_at,
     "v1": strategy.dip_signal_at,
     "v2": strategy.signal_at,
+    "breakout": strategy.breakout_signal_at,
 }
 
 _WARMUP = {"dip": strategy.DIP_MIN_CANDLES, "v1": strategy.DIP_MIN_CANDLES,
-           "pullback": strategy.MIN_CANDLES, "v2": strategy.MIN_CANDLES}
+           "pullback": strategy.MIN_CANDLES, "v2": strategy.MIN_CANDLES,
+           "breakout": strategy.BREAKOUT_MIN_CANDLES}
 
 
 def _funding_lookup(funding_points):
