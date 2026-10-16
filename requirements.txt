@@ -38,3 +38,4 @@ tornado==6.5.8
 typing_extensions==4.16.0
 tzdata==2026.3
 urllib3==2.6.3
+psycopg2-binary==2.9.10

@@ -1,8 +1,11 @@
 """
-اتصال به دیتابیس SQLite و ساخت جدول‌ها (اگر وجود نداشته باشند).
+اتصال به دیتابیس و ساخت جدول‌ها (اگر وجود نداشته باشند).
 
-مسیر فایل دیتابیس از config/settings.py (DATABASE_PATH) خونده می‌شه، همون
-مسیری که قبلاً برای دیتابیس در نظر گرفته شده بود ولی استفاده نمی‌شد.
+- اگر متغیر محیطی DATABASE_URL تنظیم شده باشد (مثلاً یک Postgres رایگان روی
+  Neon)، از همان استفاده می‌شود. این برای هاست‌هایی لازم است که دیسکشان با هر
+  ری‌استارت پاک می‌شود (مثل پلن رایگان Render).
+- در غیر این صورت، مثل قبل یک فایل SQLite در DATABASE_PATH ساخته می‌شود
+  (اجرای لوکال روی مک، یا هاستی با volume دائمی).
 """
 
 import os
@@ -13,12 +16,31 @@ from sqlalchemy.orm import sessionmaker
 from config.settings import DATABASE_PATH
 from src.db.models import Base
 
-_db_dir = os.path.dirname(DATABASE_PATH)
 
-if _db_dir:
-    os.makedirs(_db_dir, exist_ok=True)
+def _make_engine():
 
-engine = create_engine(f"sqlite:///{DATABASE_PATH}", connect_args={"check_same_thread": False})
+    url = os.environ.get("DATABASE_URL", "").strip()
+
+    if url:
+
+        # بعضی سرویس‌ها آدرس را با postgres:// می‌دهند که SQLAlchemy 2 نمی‌شناسد
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+
+        # pool_pre_ping: دیتابیس‌های serverless (مثل Neon) بعد از چند دقیقه
+        # بیکاری خاموش می‌شوند و اتصال‌های قبلی را قطع می‌کنند؛ این گزینه قبل از
+        # هر استفاده اتصال را چک و در صورت نیاز عوض می‌کند.
+        return create_engine(url, pool_pre_ping=True, pool_recycle=300)
+
+    db_dir = os.path.dirname(DATABASE_PATH)
+
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
+    return create_engine(f"sqlite:///{DATABASE_PATH}", connect_args={"check_same_thread": False})
+
+
+engine = _make_engine()
 
 Base.metadata.create_all(engine)
 
