@@ -13,6 +13,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from src.app_settings import locate_setting, read_setting, streamlit_secret_names
+from src import remember_me
 from src.password_utils import hash_password
 
 load_dotenv()
@@ -109,12 +110,28 @@ def require_login():
     if st.session_state.get("authenticated"):
         return
 
+    # «مرا به خاطر بسپار»: اگر مرورگر توکن معتبر دارد، بدون رمز وارد شو.
+    # بعد از «خروج» در همین نشست، کوکی قدیمی (که Streamlit فقط یک‌بار در شروع
+    # نشست می‌خواند) دیگر قبول نمی‌شود.
+    if not st.session_state.get("logged_out") and remember_me.token_is_valid(
+        remember_me.read_cookie(), _read_secret("APP_PASSWORD_HASH")
+    ):
+        st.session_state.authenticated = True
+        return
+
     st.set_page_config(page_title="ورود به پنل", page_icon="🔒")
     st.title("🔒 ورود به CryptoPilot AI")
+
+    if st.session_state.pop("clear_cookie", False):
+        remember_me.clear_cookie()
 
     with st.form("login_form"):
 
         password = st.text_input("رمز عبور", type="password")
+        remember = st.checkbox(
+            "مرا به خاطر بسپار (" + str(remember_me.REMEMBER_DAYS) + " روز)", value=True,
+            help="روی کامپیوتر یا گوشی مشترک تیک این گزینه را بردار.",
+        )
         submitted = st.form_submit_button("ورود", type="primary", width='stretch')
 
     if submitted:
@@ -125,8 +142,35 @@ def require_login():
 
         if hmac.compare_digest(entered_hash, expected_hash):
             st.session_state.authenticated = True
+            if remember:
+                st.session_state.pending_cookie = remember_me.make_token(expected_hash)
             st.rerun()
         else:
             st.error("رمز عبور اشتباه است.")
 
     st.stop()
+
+
+def _logout():
+
+    st.session_state.authenticated = False
+    st.session_state.logged_out = True
+    st.session_state.clear_cookie = True
+    st.session_state.pop("pending_cookie", None)
+
+
+def render_account_controls():
+
+    """
+    دکمه‌ی خروج در نوار کناری، و نوشتن کوکی «مرا به خاطر بسپار» بعد از ورود.
+    هر صفحه بعد از require_login این را صدا می‌زند.
+    """
+
+    token = st.session_state.pop("pending_cookie", None)
+
+    with st.sidebar:
+
+        if token:
+            remember_me.write_cookie(token)
+
+        st.button("🚪 خروج", on_click=_logout, width='stretch')

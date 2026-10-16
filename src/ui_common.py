@@ -2,6 +2,7 @@
 
 import streamlit as st
 
+from src.auth import render_account_controls
 from src.db.session import engine
 
 
@@ -21,3 +22,5 @@ def render_storage_status():
             "Cloud این فایل با هر ری‌استارت یا دیپلوی پاک می‌شود. برای دائمی "
             "شدن، DATABASE_URL را در Secrets تنظیم کن."
         )
+
+    render_account_controls()
