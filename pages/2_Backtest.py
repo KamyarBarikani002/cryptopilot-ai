@@ -1,6 +1,5 @@
 import time
 
-import pandas as pd
 import streamlit as st
 
 from src.auth import require_login
@@ -142,12 +141,44 @@ st.caption(
     "یعنی حدود ۱۰٪ سود و «بیشترین افت ۵R» یعنی در بدترین دوره حدود ۵٪ افت."
 )
 
+def _equity_svg(points, width=900, height=220, pad=28):
+
+    """
+    منحنی سرمایه به شکل SVG ساده. st.line_chart روی Streamlit Cloud (پایتون
+    3.14) خطای TypeError می‌داد، این راه به هیچ کتابخانه‌ی نموداری وابسته نیست.
+    """
+
+    values = [0.0] + [p["equity_r"] for p in points]
+    low, high = min(values + [0.0]), max(values + [0.0])
+    span = (high - low) or 1.0
+
+    def xy(k, v):
+        x = pad + (width - 2 * pad) * k / max(len(values) - 1, 1)
+        y = pad + (height - 2 * pad) * (high - v) / span
+        return round(x, 1), round(y, 1)
+
+    line = " ".join("%s,%s" % xy(k, v) for k, v in enumerate(values))
+    zero_y = xy(0, 0.0)[1]
+    color = "#16a34a" if values[-1] >= 0 else "#dc2626"
+
+    return (
+        '<svg viewBox="0 0 %d %d" style="width:100%%;height:auto;direction:ltr">' % (width, height)
+        + '<line x1="%d" x2="%d" y1="%s" y2="%s" stroke="#9ca3af" stroke-dasharray="4 4"/>' % (pad, width - pad, zero_y, zero_y)
+        + '<polyline fill="none" stroke="%s" stroke-width="2.5" points="%s"/>' % (color, line)
+        + '<text x="%d" y="%d" font-size="13" fill="#6b7280">%+.1fR</text>' % (pad, pad - 8, high)
+        + '<text x="%d" y="%d" font-size="13" fill="#6b7280">%+.1fR</text>' % (pad, height - 6, low)
+        + '<text x="%d" y="%d" font-size="13" fill="#6b7280" text-anchor="end">%s → %s (%d معامله)</text>' % (
+            width - pad, height - 6, points[0]["time"][:10], points[-1]["time"][:10], len(points))
+        + "</svg>"
+    )
+
+
 label, main_trades = report["results"][0]
 
 if main_trades:
 
     st.subheader("منحنی سرمایه — " + label)
-    st.line_chart(pd.DataFrame(equity_curve(main_trades)), x="time", y="equity_r")
+    st.markdown(_equity_svg(equity_curve(main_trades)), unsafe_allow_html=True)
 
     st.subheader("به تفکیک ارز")
     per_symbol = {}
