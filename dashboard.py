@@ -4,7 +4,13 @@ from datetime import datetime
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-from config.settings import SCAN_TOP_N, INITIAL_CAPITAL, PROJECT_NAME, SIGNAL_STRATEGY
+from config.settings import (
+    INITIAL_CAPITAL,
+    PROJECT_NAME,
+    SCAN_TOP_N,
+    SIGNAL_STRATEGY,
+    SIGNAL_STRATEGY_HAS_PROVEN_EDGE,
+)
 from src.futures.strategy import STRATEGY_TITLES
 from src.futures.scanner import scan_market
 from src.futures.demo_data import (
@@ -168,6 +174,13 @@ with st.sidebar:
         st.session_state.panel_settings = current_settings
         save_panel_settings(current_settings)
 
+
+if not SIGNAL_STRATEGY_HAS_PROVEN_EDGE:
+    st.warning(
+        "⚠️ استراتژی فعلی در بک‌تست ۱۸۰ روزه با داده‌ی کامل کوکوین سود خالص نداشته "
+        "است (جزئیات در صفحه‌ی Backtest). سیگنال‌ها را فعلاً فقط برای آزمایش و ثبت "
+        "در تاریخچه استفاده کن، نه برای معامله‌ی واقعی."
+    )
 
 budget = daily_budget(load_history(), risk_percent, daily_loss_limit)
 
