@@ -11,6 +11,7 @@ from config.settings import ASSET_SYMBOLS, PROJECT_NAME  # noqa: E402
 from src.market_data import get_prices  # noqa: E402
 from src.portfolio.portfolio_state import load_state  # noqa: E402
 from src.core.pipeline import CryptoPilotPipeline  # noqa: E402
+from src.ui_common import render_storage_status  # noqa: E402
 
 
 st.set_page_config(
@@ -42,6 +43,8 @@ st.caption(
     "مدیریت می‌کنه. جدا از اسکنر فیوچرز است؛ این یک استراتژی بلندمدت‌تر و "
     "محافظه‌کارانه‌تره."
 )
+
+render_storage_status()
 
 state = load_state()
 

@@ -187,4 +187,22 @@ def test_dca_page_renders_with_kucoin_prices():
     at = _app("pages/1_Spot_DCA_Portfolio.py")
     at.run(timeout=60)
     assert not at.exception
-    assert not at.warning, [w.value for w in at.warning]
+    price_warnings = [w.value for w in at.warning if "کوکوین" in w.value]
+    assert not price_warnings, price_warnings
+
+
+def test_storage_status_warns_while_data_is_only_in_sqlite():
+    at = _app("dashboard.py")
+    at.run(timeout=60)
+    assert any("SQLite" in w.value and "DATABASE_URL" in w.value for w in at.sidebar.warning)
+
+
+def test_storage_status_is_calm_on_postgres():
+    import src.ui_common as ui
+    fake_engine = mock.Mock()
+    fake_engine.dialect.name = "postgresql"
+    with mock.patch.object(ui, "engine", fake_engine):
+        at = _app("dashboard.py")
+        at.run(timeout=60)
+    assert not any("SQLite" in w.value for w in at.sidebar.warning)
+    assert any("Postgres" in c.value for c in at.sidebar.caption)

@@ -15,6 +15,7 @@ from src.futures.demo_data import (
 )
 from src.futures.futures_market_data import get_futures_prices
 from src.exchange_health import check_kucoin_connectivity
+from src.ui_common import render_storage_status
 from src.futures.signal_tracker import (
     record_new_signals,
     update_open_signals,
@@ -216,6 +217,9 @@ if auto_refresh_enabled and st.session_state.last_scan_time:
         " | اسکن بعدی تا " + str(next_scan_in) + " ثانیه دیگر "
         "(این تب باید باز بماند)"
     )
+
+
+render_storage_status()
 
 
 if health_clicked:
