@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from config.settings import MONTHLY_INVESTMENT
 from src.portfolio.portfolio_state import load_state, save_state
@@ -91,11 +91,48 @@ class Account:
 
         return contribution_record
 
+    @staticmethod
+    def current_signal_period():
+
+        """
+        کندل ساعتی فعلی به وقت UTC، مثل "2026-10-16T14". تحلیل روی کندل‌های
+        ساعتی انجام می‌شود، پس در هر ساعت حداکثر یک معامله‌ی سیگنال مجاز است.
+        """
+
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H")
+
     def apply_signal(self, decision, price, risk):
 
         """
         سیگنال خرید/فروش BTC رو روی نقد و دارایی واقعی و ماندگار پیاده می‌کنه.
+
+        در هر کندل ساعتی حداکثر یک معامله انجام می‌شود. قبلاً هر بار که دکمه‌ی
+        «اجرای یک چرخه» زده می‌شد، همان خرید با همان داده تکرار می‌شد تا نقد
+        تمام شود (با ۲۰۰ دلار و رژیم صعودی، هر کلیک حدود ۸۰ دلار).
         """
+
+        is_trade = (
+            (decision in ("BUY", "ACCUMULATE") and self.state["cash"] > 0)
+            or (decision == "SELL" and self.state["holdings"].get("BTC", 0) > 0)
+        )
+
+        period = self.current_signal_period()
+
+        if is_trade and self.state.get("last_signal_period") == period:
+            return {
+                "type": "SKIPPED",
+                "decision": decision,
+                "period": period
+            }
+
+        result = self._execute_signal(decision, price, risk)
+
+        if result is not None:
+            self.state["last_signal_period"] = period
+
+        return result
+
+    def _execute_signal(self, decision, price, risk):
 
         if decision in ("BUY", "ACCUMULATE") and self.state["cash"] > 0:
 

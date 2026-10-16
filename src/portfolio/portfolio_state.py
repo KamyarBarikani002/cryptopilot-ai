@@ -25,6 +25,7 @@ def _default_state():
         "holdings": {},
         "total_contributed": INITIAL_CAPITAL,
         "last_contribution_period": None,
+        "last_signal_period": None,
         "contributions": []
     }
 
@@ -100,6 +101,7 @@ def load_state():
             "holdings": holdings,
             "total_contributed": row.total_contributed,
             "last_contribution_period": row.last_contribution_period,
+            "last_signal_period": row.last_signal_period,
             "contributions": contributions
         }
 
@@ -122,6 +124,7 @@ def save_state(state):
         row.cash = state["cash"]
         row.total_contributed = state["total_contributed"]
         row.last_contribution_period = state["last_contribution_period"]
+        row.last_signal_period = state.get("last_signal_period")
 
         # ساده‌ترین راه درست برای sync کردن holdings: پاک کردن و دوباره نوشتن
         session.query(Holding).delete()

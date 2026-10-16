@@ -34,6 +34,9 @@ class PortfolioState(Base):
     cash = Column(Float, default=0.0)
     total_contributed = Column(Float, default=0.0)
     last_contribution_period = Column(String, nullable=True)
+    # کندل ساعتی (UTC) که آخرین معامله‌ی سیگنال BTC در آن انجام شد؛ برای اینکه
+    # با کلیک‌های پشت‌سرهم روی «اجرای یک چرخه» همان معامله تکرار نشود.
+    last_signal_period = Column(String, nullable=True)
 
 
 class Holding(Base):

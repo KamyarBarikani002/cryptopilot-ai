@@ -146,7 +146,19 @@ class CryptoPilotPipeline:
                     )
 
 
-        if signal_action:
+        if signal_action and signal_action["type"] == "SKIPPED":
+
+            print("-----------------------")
+            print("BTC Signal Action")
+            print("-----------------------")
+            print(
+                "Skipped:", signal_action["decision"],
+                "was already acted on in this hourly candle (",
+                signal_action["period"] + ":00 UTC ).",
+                "Next trade allowed from the next hour."
+            )
+
+        elif signal_action:
 
             print("-----------------------")
             print("BTC Signal Action")
