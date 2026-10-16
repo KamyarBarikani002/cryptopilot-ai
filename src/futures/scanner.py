@@ -1,10 +1,11 @@
 """
-اسکنر فیوچرز: پرحجم‌ترین قراردادهای کوکوین را با استراتژی «پولبک در جهت روند»
-(src/futures/strategy.py) بررسی می‌کند و برای هر فرصت یک پلن معامله با نسبت
-سود به ضرر دست‌کم ۱ به ۲ (بعد از کارمزد) می‌سازد.
+اسکنر فیوچرز: پرحجم‌ترین قراردادهای کوکوین را با استراتژی انتخاب‌شده در
+config/settings.py (SIGNAL_STRATEGY، تعریف‌ها در src/futures/strategy.py)
+بررسی می‌کند و برای هر فرصت یک پلن معامله با نسبت سود به ضرر دست‌کم ۱ به ۲
+(بعد از کارمزد) می‌سازد.
 
-فاندامنتال (فاندینگ، روند Open Interest، ترس‌وطمع) شرط ورود نیست، به‌جز فیلتر
-فاندینگ خیلی شلوغ؛ فقط در امتیاز اطمینان و ترتیب نمایش اثر دارد.
+فاندامنتال (فاندینگ، روند Open Interest، ترس‌وطمع) شرط ورود نیست (مگر فیلتر
+فاندینگ در پارامترها روشن باشد)؛ فقط در امتیاز اطمینان و ترتیب نمایش اثر دارد.
 """
 
 from config.settings import (
@@ -16,6 +17,8 @@ from config.settings import (
     SCAN_CANDLES,
     SCAN_INTERVAL,
     SCAN_TOP_N,
+    SIGNAL_STRATEGY,
+    SIGNAL_STRATEGY_PARAMS,
 )
 from src.futures import strategy
 from src.futures.fundamental_engine import (
@@ -59,15 +62,19 @@ def scan_symbol(
 
     candles = kline_fetcher(symbol, SCAN_INTERVAL, SCAN_CANDLES)
 
-    if len(candles) < strategy.MIN_CANDLES:
+    needed = strategy.MIN_CANDLES_BY_STRATEGY[SIGNAL_STRATEGY]
+
+    if len(candles) < needed:
         raise ValueError(
             "فقط " + str(len(candles)) + " کندل موجود است؛ دست‌کم "
-            + str(strategy.MIN_CANDLES) + " لازم است (احتمالاً ارز تازه لیست شده)."
+            + str(needed) + " لازم است (احتمالاً ارز تازه لیست شده)."
         )
 
     funding_rate_percent = _safe(funding_fetcher, symbol, None)
 
-    signal = strategy.latest_signal(candles, funding_rate_percent)
+    signal = strategy.latest_signal(
+        candles, funding_rate_percent, SIGNAL_STRATEGY_PARAMS, SIGNAL_STRATEGY
+    )
 
     if signal is None:
         return None

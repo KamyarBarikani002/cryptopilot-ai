@@ -234,13 +234,108 @@ def _strength(adx, rsi_now, up, volume, volume_sma, close, ema20, atr):
     return round(trend + room + vol + tight)
 
 
-def latest_signal(candles, funding_percent=None, params=None):
+# ---------------------------------------------------------------------------
+# استراتژی «خرید افت در روند» (منطق قبلی اسکنر، با حد سود/ضرر جدید)
+# ---------------------------------------------------------------------------
+#
+# Long: قیمت بالای میانگین ۲۰ کندل (روند صعودی کوتاه‌مدت) ولی RSI زیر ۳۰، یعنی
+# یک افت تند داخل روند صعودی. Short برعکس: زیر میانگین و RSI بالای ۷۰.
+# در بک‌تست ۱۸۰ روزه روی ۳۰ ارز کوکوین از «پولبک در جهت روند» بهتر بود، برای
+# همین الان استراتژی پیش‌فرض اسکنر است. فیلترهای اضافه پیش‌فرض خاموش‌اند و در
+# صفحه‌ی بک‌تست با هم مقایسه می‌شوند.
+
+DIP_DEFAULT_PARAMS = {
+    "rsi_low": 30,
+    "rsi_high": 70,
+    "use_ema200_filter": False,
+    "adx_min": None,
+    "use_funding_filter": False,
+    "funding_crowded_percent": 0.05,
+}
+
+DIP_MIN_CANDLES = 100
+
+
+def dip_signal_at(data, i, funding_percent=None, params=None):
+
+    from src.futures.futures_risk import estimate_volatility_percent, suggest_stop_loss_percent
+    from src.technical_analysis import calculate_ma, calculate_rsi
+
+    p = {**DIP_DEFAULT_PARAMS, **(params or {})}
+
+    if i < DIP_MIN_CANDLES - 1:
+        return None
+
+    closes = data["close"][i - DIP_MIN_CANDLES + 1:i + 1]
+    ma = calculate_ma(closes)
+    rsi_now = calculate_rsi(closes)
+
+    if ma is None or rsi_now is None:
+        return None
+
+    price = closes[-1]
+
+    if price > ma and rsi_now < p["rsi_low"]:
+        direction = "LONG"
+    elif price < ma and rsi_now > p["rsi_high"]:
+        direction = "SHORT"
+    else:
+        return None
+
+    up = direction == "LONG"
+
+    if p["use_ema200_filter"]:
+        ema200 = data["ema200"][i]
+        if ema200 is None or (up and price <= ema200) or (not up and price >= ema200):
+            return None
+
+    adx = data["adx"][i]
+    if p["adx_min"] is not None and (adx is None or adx < p["adx_min"]):
+        return None
+
+    if p["use_funding_filter"] and funding_percent is not None:
+        if up and funding_percent > p["funding_crowded_percent"]:
+            return None
+        if not up and funding_percent < -p["funding_crowded_percent"]:
+            return None
+
+    stop_percent = suggest_stop_loss_percent(estimate_volatility_percent(closes))
+    stop = price * (1 - stop_percent / 100) if up else price * (1 + stop_percent / 100)
+
+    # هرچه RSI از ۳۰ (یا ۷۰) دورتر، افت/جهش تندتر -> امتیاز بیشتر (فقط برای ترتیب)
+    depth = (p["rsi_low"] - rsi_now) if up else (rsi_now - p["rsi_high"])
+    strength = round(50 + min(max(depth, 0), 25) * 2)
+
+    atr = data["atr"][i]
+
+    return {
+        "direction": direction,
+        "entry": price,
+        "stop": stop,
+        "strength": strength,
+        "adx": round(adx, 1) if adx is not None else None,
+        "rsi": round(rsi_now, 1),
+        "atr_percent": round(atr / price * 100, 3) if atr else None,
+        "trend_4h": data["trend_4h"][i],
+    }
+
+
+SIGNAL_FUNCTIONS = {"pullback": signal_at, "dip": dip_signal_at}
+MIN_CANDLES_BY_STRATEGY = {"pullback": MIN_CANDLES, "dip": DIP_MIN_CANDLES}
+
+STRATEGY_TITLES = {
+    "dip": "خرید افت در روند (MA20 + RSI)",
+    "pullback": "پولبک در جهت روند (EMA + ADX)",
+}
+
+
+def latest_signal(candles, funding_percent=None, params=None, name="pullback"):
 
     """برای اسکنر زنده: سیگنال روی آخرین کندل بسته‌شده."""
 
-    if len(candles) < MIN_CANDLES:
+    if len(candles) < MIN_CANDLES_BY_STRATEGY[name]:
         return None
 
     data = compute_indicators(candles)
 
-    return signal_at(data, len(candles) - 1, funding_percent, params)
+    return SIGNAL_FUNCTIONS[name](data, len(candles) - 1, funding_percent, params)

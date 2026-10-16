@@ -8,7 +8,7 @@ from src.auth import require_login
 require_login()
 
 from config.settings import FUTURES_TAKER_FEE_PERCENT, PROJECT_NAME, REWARD_RISK_RATIO  # noqa: E402
-from src.futures.backtest import equity_curve, summarize  # noqa: E402
+from src.futures.backtest import equity_curve, split_halves, summarize  # noqa: E402
 from src.futures.backtest_job import BacktestJob  # noqa: E402
 from src.futures.fundamental_engine import get_funding_history  # noqa: E402
 from src.futures.futures_market_data import (  # noqa: E402
@@ -116,6 +116,7 @@ with st.expander("زمان دانلود هر ارز (ثانیه)"):
 summary_rows = []
 for label, trades in report["results"]:
     s = summarize(trades)
+    first, second = (summarize(half) for half in split_halves(trades, report.get("middle", "")))
     summary_rows.append({
         "استراتژی": label,
         "معاملات": s["trades"],
@@ -127,11 +128,15 @@ for label, trades in report["results"]:
         "مجموع (R)": s["total_r"],
         "Profit factor": s["profit_factor"],
         "بیشترین افت (R)": s["max_drawdown_r"],
+        "نیمه‌ی اول (R)": first["total_r"],
+        "نیمه‌ی دوم (R)": second["total_r"],
     })
 
 st.subheader("مقایسه")
 st.dataframe(summary_rows, use_container_width=True, hide_index=True)
 st.caption(
+    "«نیمه‌ی اول/دوم» نتیجه را جدا برای دو نیمه‌ی دوره نشان می‌دهد: استراتژی‌ای "
+    "که فقط در یک نیمه سود داده، احتمالاً شانسی بوده. "
     "R یعنی مقدار ریسک هر معامله. با ریسک ۱٪ سرمایه در هر معامله، «مجموع ۱۰R» "
     "یعنی حدود ۱۰٪ سود و «بیشترین افت ۵R» یعنی در بدترین دوره حدود ۵٪ افت."
 )

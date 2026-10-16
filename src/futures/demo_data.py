@@ -21,7 +21,7 @@ _WIGGLE = [0.8, 0.6, 0.7, -0.3, 0.75, 0.65, -0.25, 0.7, 0.6, -0.2]
 _DEMO_START_MS = 1791417600000   # مضربی از ۴ ساعت، تا کندل‌های ۴ ساعته درست ساخته شوند
 
 
-def synthetic_candles(direction, n=500, base_price=100.0, start_ms=_DEMO_START_MS):
+def synthetic_candles(direction, n=500, base_price=100.0, start_ms=_DEMO_START_MS, shape="pullback"):
 
     """
     کندل‌های ۱ ساعته‌ی ساختگی (با open/high/low/close/volume) برای دمو و تست:
@@ -32,6 +32,10 @@ def synthetic_candles(direction, n=500, base_price=100.0, start_ms=_DEMO_START_M
     """
 
     sign = {"up": 1, "down": -1}.get(direction, 0)
+
+    if shape == "dip":
+        return _dip_candles(sign, n, base_price, start_ms)
+
     pullback = 7
     price = base_price
     candles = []
@@ -61,6 +65,32 @@ def synthetic_candles(direction, n=500, base_price=100.0, start_ms=_DEMO_START_M
     return candles
 
 
+def _dip_candles(sign, n, base_price, start_ms):
+
+    """
+    الگوی «افت تند داخل روند»: روند خیلی قوی، بعد ۱۴ کندل افت کوچک پشت سر هم؛
+    قیمت هنوز بالای میانگین ۲۰ کندل است ولی RSI به صفر رسیده.
+    (برای "flat" همان بازار بی‌جهت الگوی پولبک استفاده می‌شود.)
+    """
+
+    if sign == 0:
+        return synthetic_candles("flat", n, base_price, start_ms)
+
+    price = base_price
+    candles = []
+
+    for i in range(n):
+        change = sign * _WIGGLE[i % len(_WIGGLE)] * 1.5 if i < n - 14 else -sign * 0.05
+        open_ = price
+        close = price * (1 + change / 100)
+        wick = abs(close - open_) * 0.3 + price * 0.001
+        candles.append([start_ms + i * 3_600_000, open_, max(open_, close) + wick,
+                        min(open_, close) - wick, close, 100.0])
+        price = close
+
+    return candles
+
+
 def demo_top_symbols(top_n):
 
     return _DEMO_SYMBOLS[:top_n]
@@ -80,7 +110,8 @@ def demo_klines(symbol, interval, limit=500):
     """
 
     direction = ("up", "down", "flat")[_demo_bucket(symbol)]
-    candles = synthetic_candles(direction, max(limit, 300))[-limit:]
+    from config.settings import SIGNAL_STRATEGY
+    candles = synthetic_candles(direction, max(limit, 300), shape=SIGNAL_STRATEGY)[-limit:]
 
     # قیمت آخر را به یک قیمت واقعی‌نما برای همان ارز می‌رسانیم
     scale = _DEMO_LAST_PRICES.get(symbol, 1.0) / candles[-1][4]

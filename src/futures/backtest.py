@@ -19,52 +19,19 @@ import bisect
 from datetime import datetime, timezone
 
 from src.futures import strategy
-from src.futures.futures_risk import (
-    _loss_per_unit,
-    build_trade_plan,
-    estimate_volatility_percent,
-    suggest_stop_loss_percent,
-)
-from src.technical_analysis import calculate_ma, calculate_rsi
+from src.futures.futures_risk import _loss_per_unit, build_trade_plan
 
 
-def v1_signal_at(data, i, funding_percent=None, params=None):
-
-    """
-    منطق قبلی اسکنر (فقط بخش تکنیکال): قیمت نسبت به MA20 و RSI ساده.
-    با وزن ۶۰٪ تکنیکال و آستانه‌ی ۴۵، بدون کمک فاندامنتال فقط این دو حالت به
-    آستانه می‌رسید: روند صعودی + RSI زیر ۳۰ (لانگ) و روند نزولی + RSI بالای ۷۰ (شورت).
-    """
-
-    if i < 100:
-        return None
-
-    closes = data["close"][i - 99:i + 1]
-    ma = calculate_ma(closes)
-    rsi = calculate_rsi(closes)
-
-    if ma is None or rsi is None:
-        return None
-
-    price = closes[-1]
-
-    if price > ma and rsi < 30:
-        direction = "LONG"
-    elif price < ma and rsi > 70:
-        direction = "SHORT"
-    else:
-        return None
-
-    stop_percent = suggest_stop_loss_percent(estimate_volatility_percent(closes))
-    stop = price * (1 - stop_percent / 100) if direction == "LONG" else price * (1 + stop_percent / 100)
-
-    return {"direction": direction, "entry": price, "stop": stop, "strength": 50}
-
-
+# نام‌های قدیمی (v1 = منطق قبلی، v2 = پولبک) برای سازگاری نگه داشته شده‌اند
 STRATEGIES = {
+    "dip": strategy.dip_signal_at,
+    "pullback": strategy.signal_at,
+    "v1": strategy.dip_signal_at,
     "v2": strategy.signal_at,
-    "v1": v1_signal_at,
 }
+
+_WARMUP = {"dip": strategy.DIP_MIN_CANDLES, "v1": strategy.DIP_MIN_CANDLES,
+           "pullback": strategy.MIN_CANDLES, "v2": strategy.MIN_CANDLES}
 
 
 def _funding_lookup(funding_points):
@@ -103,7 +70,7 @@ def backtest_symbol(
 
     trades = []
     n = len(candles)
-    i = strategy.MIN_CANDLES if strategy_name == "v2" else 100
+    i = _WARMUP[strategy_name]
 
     while i < n - 1:
 
@@ -167,6 +134,15 @@ def backtest_symbol(
 def _iso(time_ms):
 
     return datetime.fromtimestamp(time_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def split_halves(trades, middle_iso):
+
+    """معاملات نیمه‌ی اول و دوم دوره، برای دیدن اینکه نتیجه پایدار است یا شانسی."""
+
+    first = [t for t in trades if t["opened"] < middle_iso]
+    second = [t for t in trades if t["opened"] >= middle_iso]
+    return first, second
 
 
 def summarize(trades):

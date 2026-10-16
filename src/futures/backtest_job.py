@@ -17,12 +17,13 @@ from src.futures.backtest import backtest_symbol
 HOUR_MS = 3_600_000
 WARMUP_CANDLES = 300
 
+# اولین ردیف = استراتژی فعلی اسکنر. بقیه برای مقایسه‌اند.
 STRATEGY_VARIANTS = [
-    ("نسخه‌ی جدید (پولبک در جهت روند)", "v2", {}),
-    ("نسخه‌ی جدید بدون فیلتر روند ۴ ساعته", "v2", {"use_4h_filter": False}),
-    ("نسخه‌ی جدید با ADX ≥ 25 (سخت‌گیرتر)", "v2", {"adx_min": 25}),
-    ("نسخه‌ی جدید بدون فیلتر ADX", "v2", {"use_adx_filter": False}),
-    ("منطق قبلی (MA20 + RSI)", "v1", {}),
+    ("خرید افت در روند — استراتژی فعلی اسکنر", "dip", {}),
+    ("خرید افت + فیلتر روند EMA200", "dip", {"use_ema200_filter": True}),
+    ("خرید افت + ADX ≥ 20", "dip", {"adx_min": 20}),
+    ("خرید افت + فیلتر فاندینگ", "dip", {"use_funding_filter": True}),
+    ("پولبک در جهت روند (EMA + ADX)", "pullback", {}),
 ]
 
 
@@ -107,7 +108,7 @@ class BacktestJob:
             for symbol, (candles, funding, tick) in loaded.items():
                 trades += backtest_symbol(
                     symbol, candles, name, params,
-                    funding_points=funding if name == "v2" else None,
+                    funding_points=funding,
                     min_reward_risk=REWARD_RISK_RATIO, fee_percent=FUTURES_TAKER_FEE_PERCENT,
                     max_hold=s["max_hold"], tick_size=tick,
                 )
@@ -121,4 +122,5 @@ class BacktestJob:
             "seconds": round(time.time() - started),
             "timings": timings,
             "ran_at": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+            "middle": time.strftime("%Y-%m-%d %H:%M", time.gmtime((end_ms - s["days"] * 12 * HOUR_MS) / 1000)),
         }

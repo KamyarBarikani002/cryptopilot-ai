@@ -119,9 +119,9 @@ def test_four_hour_trend_uses_only_finished_four_hour_candles():
 
 # ---------------- backtest ----------------
 
-def _candles_after_signal(direction, path):
+def _candles_after_signal(direction, path, shape="pullback"):
     """textbook setup, then the given future (list of (high, low) relative to entry)."""
-    base = synthetic_candles(direction, n=500)
+    base = synthetic_candles(direction, n=500, shape=shape)
     entry = base[-1][4]
     t = base[-1][0]
     future = []
@@ -163,3 +163,28 @@ def test_summary_math():
 def test_old_logic_still_runs_for_comparison():
     trades = backtest.backtest_symbol("T", synthetic_candles("up", n=600), "v1")
     assert isinstance(trades, list)
+
+
+def test_dip_strategy_signals_and_backtests():
+    long_ = strategy.latest_signal(synthetic_candles("up", shape="dip"), name="dip")
+    short = strategy.latest_signal(synthetic_candles("down", shape="dip"), name="dip")
+    assert long_["direction"] == "LONG" and long_["stop"] < long_["entry"]
+    assert short["direction"] == "SHORT" and short["stop"] > short["entry"]
+    assert strategy.latest_signal(synthetic_candles("flat", shape="dip"), name="dip") is None
+    trades = backtest.backtest_symbol(
+        "T", _candles_after_signal("up", [(1.001, 0.999), (1.2, 0.999)], shape="dip"), "dip")
+    assert trades[-1]["result"] == "WIN" and trades[-1]["r"] == pytest.approx(2.0, abs=0.02)
+
+
+def test_dip_filters():
+    candles = synthetic_candles("up", shape="dip")
+    assert strategy.latest_signal(candles, 0.08, {"use_funding_filter": True}, "dip") is None
+    assert strategy.latest_signal(candles, 0.08, {}, "dip") is not None
+    assert strategy.latest_signal(candles, None, {"adx_min": 101}, "dip") is None
+    assert strategy.latest_signal(candles, None, {"use_ema200_filter": True}, "dip") is not None
+
+
+def test_half_split():
+    trades = [{"opened": "2026-01-01 00:00"}, {"opened": "2026-03-01 00:00"}]
+    first, second = backtest.split_halves(trades, "2026-02-01 00:00")
+    assert first == trades[:1] and second == trades[1:]

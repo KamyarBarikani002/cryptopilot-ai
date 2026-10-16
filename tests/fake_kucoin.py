@@ -55,15 +55,15 @@ CONTRACTS = [
 
 
 def futures_klines_oldest_first(symbol, n=500):
-    # the strategy's textbook setups, ending with the last *closed* hour:
-    # "up" symbols: uptrend, 7-candle pullback, strong bullish trigger candle;
-    # the others: the mirror image (best Short entry).
+    # the live strategy's textbook setups, ending with the last *closed* hour:
+    # "up" symbols give a Long, the others the mirror image (a Short).
     from src.futures.demo_data import synthetic_candles
     now_ms = int(time.time() * 1000)
     end_ms = now_ms // 14_400_000 * 14_400_000          # a 4h boundary in the past
     start_ms = end_ms - n * 3_600_000
     up = symbol in ("XBTUSDTM", "SOLUSDTM", "XRPUSDTM")
-    rows = synthetic_candles("up" if up else "down", n, 100.0, start_ms)
+    from config.settings import SIGNAL_STRATEGY
+    rows = synthetic_candles("up" if up else "down", n, 100.0, start_ms, shape=SIGNAL_STRATEGY)
     last = float(next(c for c in CONTRACTS if c["symbol"] == symbol)["lastTradePrice"])
     scale = last / rows[-1][4]
     return [[c[0]] + [v * scale for v in c[1:5]] + [c[5], 1] for c in rows]
