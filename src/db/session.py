@@ -14,12 +14,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from config.settings import DATABASE_PATH
+from src.app_settings import read_setting
 from src.db.models import Base
 
 
 def _make_engine():
 
-    url = os.environ.get("DATABASE_URL", "").strip()
+    url = read_setting("DATABASE_URL") or ""
 
     if url:
 

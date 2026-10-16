@@ -12,6 +12,7 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 
+from src.app_settings import locate_setting, read_setting, streamlit_secret_names
 from src.password_utils import hash_password
 
 load_dotenv()
@@ -19,29 +20,7 @@ load_dotenv()
 
 def _read_secret(name):
 
-    """
-    مقدار متغیر محیطی رو می‌خونه و فاصله‌های اضافه اول/آخرش رو حذف می‌کنه.
-
-    اگر متغیر با اسم دقیق پیدا نشه، بین کلیدهای محیط دنبال اسمی می‌گرده که
-    بعد از حذف فاصله‌ها برابر همین اسم باشه. دلیلش یک تجربه واقعی است: توی
-    پنل Railway اسم متغیر با یک فاصله اضافه ذخیره شده بود
-    ("APP_PASSWORD_SALT ")، که توی رابط کاربری اصلاً دیده نمی‌شد و باعث شد
-    برنامه فکر کند رمزی تنظیم نشده.
-    """
-
-    value = os.environ.get(name)
-
-    if value is None:
-
-        for key, candidate in os.environ.items():
-            if key.strip() == name:
-                value = candidate
-                break
-
-    if value is None:
-        return None
-
-    return value.strip()
+    return read_setting(name)
 
 
 def _password_is_configured() -> bool:
@@ -52,39 +31,32 @@ def _password_is_configured() -> bool:
 def _environment_report() -> str:
 
     """
-    گزارش تشخیصی: نشون می‌ده برنامه کدوم متغیرها رو می‌بینه، بدون اینکه
-    مقدارشون رو لو بده. برای وقتیه که متغیرها روی سرور تنظیم شدن ولی برنامه
-    پیداشون نمی‌کنه.
+    گزارش تشخیصی: نشون می‌ده برنامه هر مقدار رو از کجا پیدا کرده (یا نکرده)،
+    بدون اینکه خود مقدار رو لو بده.
     """
 
     lines = []
 
     for name in ("APP_PASSWORD_SALT", "APP_PASSWORD_HASH"):
 
-        raw = os.environ.get(name)
-        exact = raw is not None
+        value, source = locate_setting(name)
 
-        if raw is None:
-            for key, candidate in os.environ.items():
-                if key.strip() == name:
-                    raw = candidate
-                    lines.append(name + ": FOUND but the variable NAME has extra whitespace")
-                    break
-
-        if raw is None:
+        if value is None:
             lines.append(name + ": NOT FOUND")
-        elif not exact:
-            pass
-        elif not raw.strip():
-            lines.append(name + ": EMPTY")
+        elif not value:
+            lines.append(name + ": EMPTY (in " + source + ")")
         else:
-            lines.append(name + ": OK (" + str(len(raw.strip())) + " chars)")
+            lines.append(name + ": OK, " + str(len(value)) + " chars, from " + source)
 
-    railway_count = len([key for key in os.environ if key.startswith("RAILWAY_")])
-    app_count = len([key for key in os.environ if key.startswith("APP_")])
+    secret_names = streamlit_secret_names()
 
-    lines.append("RAILWAY_* vars visible: " + str(railway_count))
-    lines.append("APP_* vars visible: " + str(app_count))
+    if secret_names is None:
+        lines.append("Streamlit Secrets: none defined")
+    else:
+        lines.append("Streamlit Secrets keys: " + (", ".join(repr(n) for n in secret_names) or "(empty)"))
+
+    lines.append("RAILWAY_* env vars: " + str(len([k for k in os.environ if k.startswith("RAILWAY_")])))
+    lines.append("APP_* env vars: " + str(len([k for k in os.environ if k.strip().startswith("APP_")])))
 
     return "\n".join(lines)
 
@@ -111,10 +83,18 @@ def require_login():
         st.code("python3 scripts/set_password.py", language="bash")
 
         st.write(
-            "اگر پنل روی سرور (مثل Railway) اجرا می‌شه، این دو متغیر محیطی "
-            "باید روی سرویس تنظیم شده باشن: APP_PASSWORD_SALT و "
-            "APP_PASSWORD_HASH — همون مقادیری که اسکریپت بالا توی فایل .env "
-            "نوشته."
+            "اگر پنل روی Streamlit Community Cloud اجرا می‌شه: Manage app → "
+            "Settings → Secrets و این دو خط رو با مقادیر خودت ذخیره کن (بعدش "
+            "اپ خودش ری‌استارت می‌شه):"
+        )
+        st.code(
+            'APP_PASSWORD_SALT = "..."\nAPP_PASSWORD_HASH = "..."',
+            language="toml"
+        )
+
+        st.write(
+            "روی هاست‌های دیگه (Railway، Render، Docker) همین دو اسم رو به‌عنوان "
+            "متغیر محیطی تعریف کن."
         )
 
         with st.expander("🔍 برنامه الان چه چیزی می‌بیند؟ (برای عیب‌یابی)", expanded=True):
