@@ -63,8 +63,8 @@ state = job.snapshot()
 with st.form("backtest_form"):
 
     columns = st.columns(4)
-    top_n = columns[0].slider("تعداد ارزهای پرحجم", 5, 30, 20, step=5)
-    days = columns[1].slider("چند روز گذشته", 30, 180, 90, step=30)
+    top_n = columns[0].slider("تعداد ارزهای پرحجم", 5, 30, 30, step=5)
+    days = columns[1].slider("چند روز گذشته", 30, 180, 180, step=30)
     max_hold = columns[2].slider("حداکثر نگه‌داری (ساعت)", 12, 168, 72, step=12)
     use_funding = columns[3].checkbox("فیلتر فاندینگ تاریخی", value=True)
     run = st.form_submit_button(
