@@ -1,43 +1,38 @@
-import json
+from config.settings import DEFAULT_SYMBOL, KUCOIN_SPOT_URL
+from src.exchange_client import ExchangeUnavailable, kucoin_get
 
-from config.settings import SPOT_BASE_URL
-from src.binance_client import binance_get
+
+def get_spot_price(symbol):
+
+    """قیمت آخرین معامله‌ی یک نماد اسپات کوکوین، مثل "BTC-USDT"."""
+
+    data = kucoin_get(
+        KUCOIN_SPOT_URL + "/api/v1/market/orderbook/level1",
+        params={"symbol": symbol}
+    )
+
+    # برای نماد نامعتبر، کوکوین "data": null برمی‌گرداند نه خطا
+    if not data or data.get("price") is None:
+        raise ExchangeUnavailable("نماد " + symbol + " در بازار اسپات کوکوین پیدا نشد.")
+
+    return float(data["price"])
 
 
 def get_btc_price():
 
-    data = binance_get(
-        SPOT_BASE_URL + "/api/v3/ticker/price",
-        params={"symbol": "BTCUSDT"}
-    )
-
-    return float(data["price"])
+    return get_spot_price(DEFAULT_SYMBOL)
 
 
 def get_prices(asset_symbols):
 
     """
-    قیمت لحظه‌ای چند دارایی رو در یک درخواست از بایننس می‌گیره.
+    قیمت لحظه‌ای چند دارایی از اسپات کوکوین.
 
-    asset_symbols: دیکشنری مثل {"BTC": "BTCUSDT", "ETH": "ETHUSDT"}
+    asset_symbols: دیکشنری مثل {"BTC": "BTC-USDT", "ETH": "ETH-USDT"}
     خروجی: دیکشنری مثل {"BTC": 65000.0, "ETH": 3200.0}
     """
 
-    pairs = list(asset_symbols.values())
-
-    data = binance_get(
-        SPOT_BASE_URL + "/api/v3/ticker/price",
-        params={"symbols": json.dumps(pairs, separators=(",", ":"))}
-    )
-
-    price_by_pair = {
-        item["symbol"]: float(item["price"])
-        for item in data
+    return {
+        asset: get_spot_price(pair)
+        for asset, pair in asset_symbols.items()
     }
-
-    prices = {}
-
-    for asset, pair in asset_symbols.items():
-        prices[asset] = price_by_pair[pair]
-
-    return prices

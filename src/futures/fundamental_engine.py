@@ -1,25 +1,34 @@
+from config.settings import FEAR_GREED_API_URL, KUCOIN_SPOT_URL
+from src.exchange_client import ExchangeUnavailable, REQUEST_TIMEOUT_SECONDS, kucoin_get
+from src.futures.futures_market_data import get_active_contracts
+
 import requests
 
-from config.settings import FUTURES_BASE_URL, FEAR_GREED_API_URL
-from src.binance_client import binance_get, REQUEST_TIMEOUT_SECONDS
+# بازه‌های مجاز برای تاریخچه‌ی Open Interest کوکوین
+_OI_INTERVALS = {
+    "5m": "5min", "15m": "15min", "30m": "30min",
+    "1h": "1hour", "4h": "4hour", "1d": "1day",
+}
 
 
 def get_funding_rate(symbol):
 
     """
-    نرخ فاندینگ فعلی (٪) قرارداد پرپچوال. فاندینگ مثبت یعنی لانگ‌ها به شورت‌ها
+    نرخ فاندینگ فعلی (٪) قرارداد دائمی. فاندینگ مثبت یعنی لانگ‌ها به شورت‌ها
     پول می‌دهند (بازار شلوغ از لانگ -> ریسک اصلاح/برگشت به سمت شورت)، فاندینگ
     منفی برعکس (بازار شلوغ از شورت -> ریسک برگشت به سمت لانگ). این یک سیگنال
     "خلاف جهت جمعیت" (contrarian) است، نه تاییدی.
+
+    از همان لیست قراردادها خوانده می‌شود (fundingFeeRate، کسری مثل 0.0001)، پس
+    به‌ازای هر ارز درخواست جداگانه لازم نیست.
     """
 
-    url = FUTURES_BASE_URL + "/fapi/v1/premiumIndex"
+    contract = get_active_contracts().get(symbol)
 
-    params = {"symbol": symbol}
+    if contract is None or contract.get("fundingFeeRate") is None:
+        raise ExchangeUnavailable("نرخ فاندینگ " + symbol + " در کوکوین پیدا نشد.")
 
-    data = binance_get(url, params=params)
-
-    return float(data["lastFundingRate"]) * 100
+    return float(contract["fundingFeeRate"]) * 100
 
 
 def get_open_interest_trend(symbol, period="1h", lookback=6):
@@ -29,21 +38,22 @@ def get_open_interest_trend(symbol, period="1h", lookback=6):
     این یک سیگنال "تاییدی" است: اگر همراه با روند قیمت باشد (مثلاً قیمت و OI
     هر دو در حال رشد)، یعنی پول تازه وارد همون جهت روند شده و روند معتبرتره؛
     اگر OI کاهشی باشد در حالی که قیمت در روند است، یعنی روند ضعیف/بدون تایید است.
+
+    کوکوین تاریخچه را از جدید به قدیم برمی‌گرداند (روی پاسخ زنده بررسی شد).
     """
 
-    url = FUTURES_BASE_URL + "/futures/data/openInterestHist"
-
-    params = {"symbol": symbol, "period": period, "limit": lookback}
-
-    data = binance_get(url, params=params)
+    data = kucoin_get(
+        KUCOIN_SPOT_URL + "/api/ua/v1/market/open-interest",
+        params={"symbol": symbol, "interval": _OI_INTERVALS[period], "pageSize": lookback}
+    )
 
     if not isinstance(data, list) or len(data) < 2:
         return 0.0
 
-    data_sorted = sorted(data, key=lambda item: item["timestamp"])
+    data_sorted = sorted(data, key=lambda item: item["ts"])
 
-    oldest = float(data_sorted[0]["sumOpenInterest"])
-    newest = float(data_sorted[-1]["sumOpenInterest"])
+    oldest = float(data_sorted[0]["openInterest"])
+    newest = float(data_sorted[-1]["openInterest"])
 
     if oldest == 0:
         return 0.0

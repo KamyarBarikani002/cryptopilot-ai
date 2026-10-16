@@ -1,0 +1,3 @@
+# برای اجرای تست‌ها روی کامپیوتر خودت:  pip install -r requirements-dev.txt && pytest
+-r requirements.txt
+pytest>=8,<9

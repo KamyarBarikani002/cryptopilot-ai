@@ -1,68 +1,140 @@
-import json
+"""
+داده‌ی بازار فیوچرز (قراردادهای دائمی USDT) از کوکوین.
 
-from config.settings import FUTURES_BASE_URL
-from src.binance_client import binance_get
+نکاتی که روی پاسخ زنده‌ی API کوکوین بررسی شد:
+- اسم قراردادها فرق دارد: بیت‌کوین XBTUSDTM است، اتریوم ETHUSDTM.
+- لیست قراردادها سهام آمریکا را هم دارد (مثل AAPLUSDTM با assetClass="STOCK")؛
+  این‌ها فیلتر می‌شوند تا اسکنر سهام اپل را فرصت کریپتو معرفی نکند.
+- کندل‌های فیوچرز از قدیم به جدید و با ترتیب [time_ms, open, high, low, close,
+  volume, turnover] می‌آیند، که بر خلاف اسپات، همان ترتیب بایننس است.
+- granularity بر حسب دقیقه است (60 = یک ساعت).
+"""
+
+import time
+
+from config.settings import KUCOIN_FUTURES_URL
+from src.exchange_client import ExchangeUnavailable, kucoin_get
+
+# لیست قراردادها هم برای انتخاب ارزها و هم برای نرخ فاندینگ لازم است؛ با این کش
+# یک اسکن کامل فقط یک بار این لیست را می‌گیرد، نه یک بار به‌ازای هر ارز.
+_CONTRACTS_CACHE_SECONDS = 60
+_contracts_cache = {"at": 0.0, "by_symbol": {}}
+
+_GRANULARITY_MINUTES = {
+    "1m": 1, "5m": 5, "15m": 15, "30m": 30,
+    "1h": 60, "2h": 120, "4h": 240, "8h": 480,
+    "12h": 720, "1d": 1440, "1w": 10080,
+}
+
+
+def get_active_contracts(max_age_seconds=_CONTRACTS_CACHE_SECONDS):
+
+    """همه‌ی قراردادهای فعال کوکوین، به شکل {symbol: contract}."""
+
+    now = time.time()
+
+    if _contracts_cache["by_symbol"] and now - _contracts_cache["at"] < max_age_seconds:
+        return _contracts_cache["by_symbol"]
+
+    data = kucoin_get(KUCOIN_FUTURES_URL + "/api/v1/contracts/active")
+
+    if not data:
+        raise ExchangeUnavailable("کوکوین لیست قراردادهای فیوچرز را برنگرداند.")
+
+    by_symbol = {contract["symbol"]: contract for contract in data}
+
+    _contracts_cache["at"] = now
+    _contracts_cache["by_symbol"] = by_symbol
+
+    return by_symbol
+
+
+def is_scannable_contract(contract, quote_asset="USDT"):
+
+    """فقط قراردادهای دائمی، خطی، کریپتویی و در حال معامله‌ی عادی."""
+
+    return (
+        contract.get("quoteCurrency") == quote_asset
+        and not contract.get("isInverse")
+        and contract.get("status") == "Open"
+        and contract.get("expireDate") is None
+        and contract.get("assetClass", "CRYPTO") == "CRYPTO"
+        and contract.get("marketStage", "NORMAL") == "NORMAL"
+    )
 
 
 def get_top_symbols_by_volume(top_n, quote_asset="USDT"):
 
     """
-    پرحجم‌ترین قراردادهای فیوچرز دائمی (Perpetual) بر اساس حجم معاملات ۲۴ ساعته.
+    پرحجم‌ترین قراردادهای فیوچرز دائمی بر اساس گردش معاملات ۲۴ ساعته (به دلار).
     """
 
-    url = FUTURES_BASE_URL + "/fapi/v1/ticker/24hr"
+    contracts = get_active_contracts(max_age_seconds=0)
 
-    data = binance_get(url)
-
-    perpetual_pairs = [
-        item
-        for item in data
-        if item["symbol"].endswith(quote_asset)
-        and "_" not in item["symbol"]  # قراردادهای تحویلی/فصلی رو کنار می‌گذاریم
+    eligible = [
+        contract
+        for contract in contracts.values()
+        if is_scannable_contract(contract, quote_asset)
     ]
 
-    perpetual_pairs.sort(
-        key=lambda item: float(item["quoteVolume"]),
+    eligible.sort(
+        key=lambda contract: float(contract.get("turnoverOf24h") or 0),
         reverse=True
     )
 
-    return [
-        item["symbol"]
-        for item in perpetual_pairs[:top_n]
-    ]
+    return [contract["symbol"] for contract in eligible[:top_n]]
 
 
 def get_futures_klines(symbol, interval, limit=100):
 
-    url = FUTURES_BASE_URL + "/fapi/v1/klines"
+    """کندل‌ها به شکل استاندارد [time_ms, open, high, low, close, volume]، قدیم به جدید."""
 
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "limit": limit
-    }
+    granularity = _GRANULARITY_MINUTES[interval]
+    now_ms = int(time.time() * 1000)
+    from_ms = now_ms - granularity * 60_000 * (limit + 1)
 
-    return binance_get(url, params=params)
+    rows = kucoin_get(
+        KUCOIN_FUTURES_URL + "/api/v1/kline/query",
+        params={
+            "symbol": symbol,
+            "granularity": granularity,
+            "from": from_ms,
+            "to": now_ms
+        }
+    )
+
+    if not rows:
+        return []
+
+    candles = [
+        [int(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])]
+        for row in rows
+    ]
+
+    candles.sort(key=lambda candle: candle[0])
+
+    return candles[-limit:]
 
 
 def get_futures_prices(symbols):
 
     """
-    قیمت لحظه‌ای چند نماد فیوچرز؛ برای به‌روزرسانی سیگنال‌های باز استفاده می‌شود.
+    قیمت آخرین معامله‌ی چند قرارداد، برای به‌روزرسانی سیگنال‌های باز.
+    نمادی که دیگر در کوکوین نیست (یا مال داده‌ی قدیمی بایننس است) کنار گذاشته می‌شود.
     """
 
     if not symbols:
         return {}
 
-    url = FUTURES_BASE_URL + "/fapi/v1/ticker/price"
+    contracts = get_active_contracts(max_age_seconds=0)
 
-    params = {
-        "symbols": json.dumps(list(symbols))
-    }
+    prices = {}
 
-    data = binance_get(url, params=params)
+    for symbol in symbols:
 
-    return {
-        item["symbol"]: float(item["price"])
-        for item in data
-    }
+        contract = contracts.get(symbol)
+
+        if contract and contract.get("lastTradePrice") is not None:
+            prices[symbol] = float(contract["lastTradePrice"])
+
+    return prices

@@ -1,17 +1,17 @@
 """
-داده‌ی نمایشی برای تست پنل بدون نیاز به اتصال اینترنت/بایننس.
+داده‌ی نمایشی برای تست پنل بدون نیاز به اتصال اینترنت/کوکوین.
 هیچ داده‌ی واقعی بازار نیست؛ فقط برای دیدن ظاهر و رفتار پنل استفاده می‌شود.
 """
 
 _DEMO_SYMBOLS = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "SOLUSDT",
-    "DOGEUSDT",
-    "LINKUSDT",
-    "ONDOUSDT",
-    "NEARUSDT",
-    "XRPUSDT",
+    "XBTUSDTM",
+    "ETHUSDTM",
+    "SOLUSDTM",
+    "DOGEUSDTM",
+    "LINKUSDTM",
+    "ONDOUSDTM",
+    "NEARUSDTM",
+    "XRPUSDTM",
 ]
 
 # این‌ها درصد تغییر هر کندل هستن (نه مقدار مطلق)؛ چون درصدی و ضربی اعمال

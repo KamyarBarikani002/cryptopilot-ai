@@ -3,7 +3,7 @@ PROJECT_NAME = "CryptoPilot AI"
 INITIAL_CAPITAL = 200
 MONTHLY_INVESTMENT = 100
 
-DEFAULT_SYMBOL = "BTCUSDT"
+DEFAULT_SYMBOL = "BTC-USDT"
 DEFAULT_INTERVAL = "1h"
 
 RISK_PER_TRADE = 0.02
@@ -14,27 +14,24 @@ PORTFOLIO_STATE_PATH = "database/portfolio_state.json"
 REPORT_PATH = "reports/"
 LOG_PATH = "logs/"
 
-# دارایی‌های پرتفوی و نماد معاملاتی هرکدام در بایننس
+# دارایی‌های پرتفوی و نماد هرکدام در بازار اسپات کوکوین (فرمت BASE-QUOTE)
 ASSET_SYMBOLS = {
-    "BTC": "BTCUSDT",
-    "ETH": "ETHUSDT",
-    "LINK": "LINKUSDT",
-    "ONDO": "ONDOUSDT",
-    "NEAR": "NEARUSDT",
+    "BTC": "BTC-USDT",
+    "ETH": "ETH-USDT",
+    "LINK": "LINK-USDT",
+    "ONDO": "ONDO-USDT",
+    "NEAR": "NEAR-USDT",
 }
 
 # ---------------------------------------------------------
 # اسکنر فرصت‌های Long/Short بازار فیوچرز
 # ---------------------------------------------------------
 
-# داده‌ی بازار اسپات از آینه‌ی رسمی و عمومی بایننس گرفته می‌شود، نه از
-# api.binance.com: این آینه فقط داده‌ی عمومی بازار (قیمت، کندل) می‌دهد و برخلاف
-# api.binance.com از سرورهای آمریکا مسدود نیست (روی Railway در US West تست شد:
-# api.binance.com کد 451 داد، این آدرس 200).
-SPOT_BASE_URL = "https://data-api.binance.vision"
-
-# فیوچرز آینه‌ی عمومی ندارد؛ این آدرس از سرورهای آمریکا با 451 رد می‌شود.
-FUTURES_BASE_URL = "https://fapi.binance.com"
+# همه‌ی داده‌ی بازار از API عمومی کوکوین (بدون کلید) گرفته می‌شود.
+# اسپات و Open Interest روی api.kucoin.com، فیوچرز روی api-futures.kucoin.com.
+# قراردادهای فیوچرز کوکوین اسم متفاوتی دارند: بیت‌کوین XBTUSDTM است، نه BTCUSDT.
+KUCOIN_SPOT_URL = "https://api.kucoin.com"
+KUCOIN_FUTURES_URL = "https://api-futures.kucoin.com"
 
 # چند ارز پرحجم فیوچرز اسکن شود
 SCAN_TOP_N = 30

@@ -14,6 +14,7 @@ from src.futures.demo_data import (
     demo_fear_greed_index
 )
 from src.futures.futures_market_data import get_futures_prices
+from src.exchange_health import check_kucoin_connectivity
 from src.futures.signal_tracker import (
     record_new_signals,
     update_open_signals,
@@ -76,7 +77,7 @@ with st.sidebar:
     st.header("تنظیمات اسکن")
 
     demo_mode = st.checkbox(
-        "حالت آزمایشی (داده نمایشی، بدون اتصال به بایننس)",
+        "حالت آزمایشی (داده نمایشی، بدون اتصال به کوکوین)",
         value=_saved["demo_mode"],
         help="برای دیدن ظاهر پنل بدون اینترنت یا برای تست سریع."
     )
@@ -100,6 +101,12 @@ with st.sidebar:
         "🔄 اسکن بازار",
         type="primary",
         use_container_width=True
+    )
+
+    health_clicked = st.button(
+        "🩺 تست اتصال به کوکوین",
+        use_container_width=True,
+        help="بررسی می‌کند کدام منبع داده (اسپات، فیوچرز، Open Interest) از روی این سرور جواب می‌دهد."
     )
 
     st.divider()
@@ -211,11 +218,24 @@ if auto_refresh_enabled and st.session_state.last_scan_time:
     )
 
 
+if health_clicked:
+
+    with st.spinner("در حال تست اتصال به کوکوین..."):
+        health_rows = check_kucoin_connectivity()
+
+    if all(row["وضعیت"] == "✅" for row in health_rows):
+        st.success("همه‌ی منابع داده‌ی کوکوین از روی این سرور در دسترس هستند.")
+    else:
+        st.error("بعضی از منابع داده‌ی کوکوین از روی این سرور جواب نمی‌دهند:")
+
+    st.dataframe(health_rows, use_container_width=True, hide_index=True)
+
+
 if st.session_state.scan_error:
 
     st.error(
         "خطا در اسکن بازار: " + st.session_state.scan_error +
-        "\n\nاگر اینترنت ندارید یا بایننس در دسترس نیست، از نوار کناری "
+        "\n\nاگر اینترنت ندارید یا کوکوین در دسترس نیست، از نوار کناری "
         "«حالت آزمایشی» رو فعال کنید."
     )
 

@@ -1,0 +1,58 @@
+"""
+نقطه‌ی مشترک همه‌ی درخواست‌ها به صرافی (کوکوین).
+
+پاسخ‌های کوکوین همیشه این شکل را دارند: {"code": "200000", "data": ...}
+اینجا سه حالت خطا به یک پیام روشن تبدیل می‌شوند، به‌جای اینکه کد بعدی با
+داده‌ی غلط کار کند:
+- HTTP 403/451: محدودیت منطقه‌ای (مثل اتفاقی که برای بایننس روی سرور آمریکا افتاد)
+- code غیر از "200000": خطای خود کوکوین (پیامش نمایش داده می‌شود)
+- خطای شبکه / timeout
+
+نکته: برای نماد نامعتبر، کوکوین خطا نمی‌دهد و فقط "data": null برمی‌گرداند؛
+این تابع data را همان‌طور برمی‌گرداند و فراخوان باید None را بررسی کند.
+"""
+
+import requests
+
+REQUEST_TIMEOUT_SECONDS = 15
+KUCOIN_OK_CODE = "200000"
+
+
+class ExchangeUnavailable(RuntimeError):
+    """صرافی درخواست را رد کرد، خطا داد، یا جواب نداد."""
+
+
+def kucoin_get(url, params=None):
+
+    host = url.split("/")[2]
+
+    try:
+        response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+    except requests.RequestException as error:
+        raise ExchangeUnavailable(
+            "اتصال به کوکوین برقرار نشد (" + type(error).__name__ + "، " + host + ")."
+        ) from error
+
+    if response.status_code in (403, 451):
+        raise ExchangeUnavailable(
+            "کوکوین درخواست‌های این سرور را رد کرد (HTTP " + str(response.status_code)
+            + "، " + host + ")؛ احتمالاً به‌خاطر محدودیت منطقه‌ای محل سرور."
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise ExchangeUnavailable(
+            "پاسخ کوکوین قابل خواندن نبود (HTTP " + str(response.status_code) + "، " + host + ")."
+        ) from error
+
+    code = str(payload.get("code")) if isinstance(payload, dict) else None
+
+    if response.status_code != 200 or code != KUCOIN_OK_CODE:
+        message = payload.get("msg") if isinstance(payload, dict) else str(payload)[:200]
+        raise ExchangeUnavailable(
+            "کوکوین خطا برگرداند (HTTP " + str(response.status_code) + "، کد "
+            + str(code) + "): " + str(message)
+        )
+
+    return payload.get("data")
