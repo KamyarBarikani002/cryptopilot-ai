@@ -52,12 +52,13 @@ st.caption(
 render_storage_status()
 
 @st.cache_resource
-def _job():
-    # یک کار مشترک برای کل سرور؛ نتیجه با قطع و وصل شدن مرورگر از بین نمی‌رود
+def _job(code_version):
+    # یک کار مشترک برای کل سرور؛ نتیجه با قطع و وصل شدن مرورگر از بین نمی‌رود.
+    # code_version: بعد از هر دیپلوی کد جدید، یک کار تازه با کد جدید ساخته شود
     return BacktestJob()
 
 
-job = _job()
+job = _job(str(id(BacktestJob)))
 state = job.snapshot()
 
 with st.form("backtest_form"):
