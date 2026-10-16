@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0">
+<script>
+// کامپوننت نامرئی: کوکی «مرا به خاطر بسپار» را از مرورگر می‌خواند و به پایتون
+// برمی‌گرداند. لازم است چون روی Streamlit Community Cloud کوکی‌ها به
+// st.context.cookies نمی‌رسند (پروکسی خودش آن‌ها را حذف می‌کند).
+// پروتکل: همان پیام‌هایی که streamlit-component-lib می‌فرستد.
+(function () {
+  function send(type, extra) {
+    window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, extra || {}), "*");
+  }
+  function readCookie(name) {
+    var parts = document.cookie ? document.cookie.split(";") : [];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i].trim();
+      if (p.indexOf(name + "=") === 0) return decodeURIComponent(p.substring(name.length + 1));
+    }
+    return "";
+  }
+  var sent = null;
+  window.addEventListener("message", function (event) {
+    var data = event.data || {};
+    if (data.type !== "streamlit:render") return;
+    var name = (data.args && data.args.name) || "";
+    var value = readCookie(name);
+    if (value !== sent) {
+      sent = value;
+      send("streamlit:setComponentValue", {value: value, dataType: "json"});
+    }
+  });
+  send("streamlit:componentReady", {apiVersion: 1});
+  send("streamlit:setFrameHeight", {height: 0});
+})();
+</script>
+</body>
+</html>

@@ -113,13 +113,16 @@ def require_login():
     # «مرا به خاطر بسپار»: اگر مرورگر توکن معتبر دارد، بدون رمز وارد شو.
     # بعد از «خروج» در همین نشست، کوکی قدیمی (که Streamlit فقط یک‌بار در شروع
     # نشست می‌خواند) دیگر قبول نمی‌شود.
-    if not st.session_state.get("logged_out") and remember_me.token_is_valid(
-        remember_me.read_cookie(), _read_secret("APP_PASSWORD_HASH")
-    ):
-        st.session_state.authenticated = True
-        return
-
     st.set_page_config(page_title="ورود به پنل", page_icon="🔒")
+
+    if not st.session_state.get("logged_out"):
+
+        token = remember_me.read_cookie() or remember_me.read_cookie_via_browser()
+
+        if remember_me.token_is_valid(token, _read_secret("APP_PASSWORD_HASH")):
+            st.session_state.authenticated = True
+            st.rerun()   # صفحه از اول، بدون کامپوننت خواندن کوکی
+
     st.title("🔒 ورود به CryptoPilot AI")
 
     if st.session_state.pop("clear_cookie", False):

@@ -45,8 +45,14 @@ def _app(cookie=None):
     from streamlit.testing.v1 import AppTest
     os.environ["APP_PASSWORD_SALT"] = "s"
     os.environ["APP_PASSWORD_HASH"] = KEY
-    patcher = mock.patch("src.remember_me.read_cookie", return_value=cookie)
-    patcher.start()
+    # on Streamlit Cloud the request carries no cookies, so the browser-side
+    # reader is what actually finds the token: test through that path
+    patcher = mock.patch.multiple(
+        "src.remember_me", read_cookie=mock.DEFAULT, read_cookie_via_browser=mock.DEFAULT
+    )
+    mocks = patcher.start()
+    mocks["read_cookie"].return_value = None
+    mocks["read_cookie_via_browser"].return_value = cookie
     return AppTest.from_file(STUB_PAGE), patcher
 
 

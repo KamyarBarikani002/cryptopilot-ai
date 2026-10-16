@@ -6,12 +6,14 @@
 
 - توکن = «زمان انقضا» + امضای HMAC آن با هش رمز پنل. پس خود رمز هیچ‌جا ذخیره
   نمی‌شود، و اگر رمز پنل عوض شود همه‌ی توکن‌های قبلی خودبه‌خود باطل می‌شوند.
-- Streamlit فقط می‌تواند کوکی‌ها را بخواند (st.context.cookies)؛ برای نوشتن و
-  پاک کردن، یک اسکریپت کوچک در یک iframe نامرئی اجرا می‌شود.
+- نوشتن و پاک کردن کوکی با یک اسکریپت کوچک در یک iframe نامرئی انجام می‌شود.
+  خواندن اول از st.context.cookies و اگر نبود (Streamlit Cloud) با کامپوننت
+  نامرئی src/cookie_reader که کوکی را از خود مرورگر می‌خواند.
 """
 
 import hashlib
 import hmac
+import os
 import time
 
 COOKIE_NAME = "cryptopilot_session"
@@ -58,11 +60,42 @@ def token_is_valid(token, signing_key: str, now: float | None = None) -> bool:
 
 def read_cookie():
 
-    """کوکی ذخیره‌شده در مرورگر (از اولین درخواست همین نشست)، یا None."""
+    """
+    کوکی از هدرهای اولین درخواست همین نشست (st.context.cookies)، یا None.
+    روی اجرای لوکال کار می‌کند؛ روی Streamlit Community Cloud پروکسی کوکی‌ها را
+    حذف می‌کند، برای همین read_cookie_via_browser هم هست.
+    """
 
     try:
         import streamlit as st
         return st.context.cookies.get(COOKIE_NAME)
+    except Exception:
+        return None
+
+
+_reader = None
+
+
+def read_cookie_via_browser():
+
+    """
+    کوکی را مستقیم از خود مرورگر می‌خواند (کامپوننت نامرئی src/cookie_reader).
+    بار اول None برمی‌گرداند و وقتی مرورگر جواب داد، صفحه خودش دوباره اجرا
+    می‌شود و مقدار (یا "" اگر کوکی نبود) برمی‌گردد.
+    """
+
+    global _reader
+
+    try:
+        import streamlit.components.v1 as components
+
+        if _reader is None:
+            _reader = components.declare_component(
+                "cookie_reader",
+                path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookie_reader"),
+            )
+
+        return _reader(name=COOKIE_NAME, key="cryptopilot_cookie_reader", default=None)
     except Exception:
         return None
 
