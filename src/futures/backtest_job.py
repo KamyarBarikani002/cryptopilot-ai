@@ -140,8 +140,8 @@ class BacktestJob:
             } if len(rows) else {}
             return per_variant, problems, round(time.time() - t0, 1)
 
-        # چند ارز همزمان (کوکوین درخواست‌های عمومی را محدود می‌کند؛ ۶ تا امن است)
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        # چند ارز همزمان (کوکوین درخواست‌های عمومی را محدود می‌کند؛ ۴ تا امن است)
+        with ThreadPoolExecutor(max_workers=4) as pool:
             futures = {pool.submit(work, symbol): symbol for symbol in symbols}
             for future in as_completed(futures):
                 symbol = futures[future]

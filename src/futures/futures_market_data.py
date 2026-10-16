@@ -174,11 +174,28 @@ def get_tick_size(symbol):
     return float(contract["tickSize"])
 
 
-def get_futures_klines_range(symbol, interval, start_ms, end_ms, pause_seconds=0.1):
+def _missing_candles(times, step_ms):
+
+    """تعداد کندل‌هایی که بین اولین و آخرین کندل جا افتاده‌اند."""
+
+    if len(times) < 2:
+        return 0
+
+    expected = (times[-1] - times[0]) // step_ms + 1
+
+    return int(expected - len(times))
+
+
+def get_futures_klines_range(symbol, interval, start_ms, end_ms, pause_seconds=0.1, attempts=3):
 
     """
     کندل‌های یک بازه‌ی طولانی (برای بک‌تست)؛ چون کوکوین حداکثر ۵۰۰ کندل در هر
     درخواست می‌دهد، بازه تکه‌تکه گرفته می‌شود. فقط کندل‌های بسته‌شده برمی‌گردند.
+
+    زیر فشار (وقتی چند ارز همزمان دانلود می‌شوند) کوکوین گاهی یک تکه را خالی
+    برمی‌گرداند؛ آن‌وقت وسط داده جای خالی می‌افتد و اندیکاتورها غلط می‌شوند.
+    برای همین تکه‌ی خالیِ وسط داده دوباره گرفته می‌شود، و اگر آخر کار هنوز
+    بیش از ۱٪ کندل‌ها کم باشد، خطا داده می‌شود تا این ارز در نتیجه حساب نشود.
     """
 
     granularity = _GRANULARITY_MINUTES[interval]
@@ -190,10 +207,19 @@ def get_futures_klines_range(symbol, interval, start_ms, end_ms, pause_seconds=0
     while cursor < end_ms:
 
         to_ms = min(cursor + page_ms, end_ms)
-        data = kucoin_get(
-            KUCOIN_FUTURES_URL + "/api/v1/kline/query",
-            params={"symbol": symbol, "granularity": granularity, "from": cursor, "to": to_ms},
-        ) or []
+
+        for attempt in range(attempts):
+
+            data = kucoin_get(
+                KUCOIN_FUTURES_URL + "/api/v1/kline/query",
+                params={"symbol": symbol, "granularity": granularity, "from": cursor, "to": to_ms},
+            ) or []
+
+            # تکه‌ی خالی قبل از لیست شدن ارز طبیعی است؛ بعد از آن نه
+            if data or not rows:
+                break
+
+            time.sleep(1 + attempt)
 
         for row in data:
             rows[int(row[0])] = [int(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5])]
@@ -203,5 +229,12 @@ def get_futures_klines_range(symbol, interval, start_ms, end_ms, pause_seconds=0
             time.sleep(pause_seconds)
 
     now_ms = int(time.time() * 1000)
+    candles = [rows[t] for t in sorted(rows) if t + step_ms <= now_ms]
 
-    return [rows[t] for t in sorted(rows) if t + step_ms <= now_ms]
+    missing = _missing_candles([c[0] for c in candles], step_ms)
+    if candles and missing > 0.01 * (len(candles) + missing):
+        raise ExchangeUnavailable(
+            "داده‌ی " + symbol + " ناقص است (" + str(missing) + " کندل جا افتاده)؛ در بک‌تست حساب نشد."
+        )
+
+    return candles

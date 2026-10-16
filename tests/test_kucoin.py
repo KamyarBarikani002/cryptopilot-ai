@@ -297,3 +297,41 @@ def test_scan_all_contracts():
     result = scan_market(top_n=None, capital=200)
     assert result["scanned"] == 6 and not result["skipped"]
     assert all(o["turnover_24h"] > 0 for o in result["longs"] + result["shorts"])
+
+
+def test_history_with_a_hole_is_refetched_or_rejected():
+    from src.exchange_client import ExchangeUnavailable
+    from src.futures.futures_market_data import get_futures_klines_range
+    hour = 3_600_000
+    end = int(time.time() * 1000) // hour * hour - 10 * hour
+    start = end - 900 * hour
+    full = {t: [t, 1, 2, 0.5, 1.5, 10, 1] for t in range(start, end, hour)}
+
+    def page(params, empty_once):
+        rows = [full[t] for t in sorted(full) if params["from"] <= t < params["to"]]
+        if empty_once.get("armed") and params["from"] > start and not empty_once.get("done"):
+            empty_once["done"] = True
+            return []
+        return rows
+
+    def fake(empty_once):
+        def get(url, params=None, timeout=None):
+            r = mock.Mock(status_code=200)
+            r.json.return_value = {"code": "200000", "data": page(params, empty_once)}
+            return r
+        return get
+
+    with mock.patch("time.sleep"):
+        # one empty page in the middle: refetched, nothing missing
+        state = {"armed": True}
+        with mock.patch("requests.get", side_effect=fake(state)):
+            assert len(get_futures_klines_range("X", "1h", start, end)) == 900
+        assert state.get("done"), "the empty middle page really happened and was refetched"
+        # a page that stays empty: the hole is detected and the symbol is rejected
+        holes = {t for t in full if start + 450 * hour <= t < start + 900 * hour}
+        for t in holes:
+            full.pop(t)
+        full[end - hour] = [end - hour, 1, 2, 0.5, 1.5, 10, 1]
+        with mock.patch("requests.get", side_effect=fake({})):
+            with pytest.raises(ExchangeUnavailable, match="ناقص"):
+                get_futures_klines_range("X", "1h", start, end)
