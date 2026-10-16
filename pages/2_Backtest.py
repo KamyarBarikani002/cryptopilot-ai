@@ -7,7 +7,8 @@ from src.auth import require_login
 require_login()
 
 from config.settings import FUTURES_TAKER_FEE_PERCENT, PROJECT_NAME, REWARD_RISK_RATIO  # noqa: E402
-from src.futures.backtest import backtest_symbol, equity_curve, summarize  # noqa: E402
+from src.futures.backtest import equity_curve, summarize  # noqa: E402
+from src.futures.backtest_job import BacktestJob  # noqa: E402
 from src.futures.fundamental_engine import get_funding_history  # noqa: E402
 from src.futures.futures_market_data import (  # noqa: E402
     get_futures_klines_range,
@@ -49,12 +50,14 @@ st.caption(
 
 render_storage_status()
 
-STRATEGY_VARIANTS = [
-    ("نسخه‌ی جدید (پولبک در جهت روند)", "v2", {}),
-    ("نسخه‌ی جدید بدون فیلتر روند ۴ ساعته", "v2", {"use_4h_filter": False}),
-    ("نسخه‌ی جدید بدون فیلتر ADX", "v2", {"use_adx_filter": False}),
-    ("منطق قبلی (MA20 + RSI)", "v1", {}),
-]
+@st.cache_resource
+def _job():
+    # یک کار مشترک برای کل سرور؛ نتیجه با قطع و وصل شدن مرورگر از بین نمی‌رود
+    return BacktestJob()
+
+
+job = _job()
+state = job.snapshot()
 
 with st.form("backtest_form"):
 
@@ -63,71 +66,51 @@ with st.form("backtest_form"):
     days = columns[1].slider("چند روز گذشته", 30, 180, 90, step=30)
     max_hold = columns[2].slider("حداکثر نگه‌داری (ساعت)", 12, 168, 72, step=12)
     use_funding = columns[3].checkbox("فیلتر فاندینگ تاریخی", value=True)
-    run = st.form_submit_button("▶️ اجرای بک‌تست", type="primary")
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _load_symbol(symbol, start_ms, end_ms, with_funding):
-
-    candles = get_futures_klines_range(symbol, "1h", start_ms, end_ms)
-    funding = get_funding_history(symbol, start_ms, end_ms) if with_funding else []
-    return candles, funding
-
+    run = st.form_submit_button(
+        "▶️ اجرای بک‌تست", type="primary", disabled=state["status"] == "running"
+    )
 
 if run:
+    job.start(
+        {"top_n": top_n, "days": days, "max_hold": max_hold, "use_funding": use_funding},
+        {
+            "symbols": get_top_symbols_by_volume,
+            "klines": get_futures_klines_range,
+            "funding": get_funding_history,
+            "tick": get_tick_size,
+        },
+    )
+    state = job.snapshot()
 
-    end_ms = int(time.time() // 3600 * 3600 * 1000)
-    # ۳۰۰ کندل اضافه برای گرم شدن EMA200 و روند ۴ ساعته
-    start_ms = end_ms - (days * 24 + 300) * 3_600_000
+if state["status"] == "running":
+    st.progress(state["progress"], text=state["message"])
+    st.caption("بک‌تست روی سرور در حال اجراست؛ می‌توانی صفحه را ببندی و بعداً برگردی.")
+    time.sleep(2)
+    st.rerun()
 
-    symbols = get_top_symbols_by_volume(top_n)
-    progress = st.progress(0.0, text="در حال دانلود تاریخچه از کوکوین...")
-    loaded, failed = {}, []
+if state["status"] == "error":
+    st.error("بک‌تست با خطا متوقف شد:\n\n" + str(state["error"]))
 
-    for k, symbol in enumerate(symbols):
-        try:
-            loaded[symbol] = _load_symbol(symbol, start_ms, end_ms, use_funding) + (get_tick_size(symbol),)
-        except Exception as error:
-            failed.append(symbol + ": " + str(error))
-        progress.progress((k + 1) / len(symbols), text="دانلود " + symbol)
+report = state["report"]
 
-    progress.progress(1.0, text="در حال اجرای بک‌تست...")
-
-    results = []
-    for label, name, params in STRATEGY_VARIANTS:
-        trades = []
-        for symbol, (candles, funding, tick) in loaded.items():
-            trades += backtest_symbol(
-                symbol, candles, name, params,
-                funding_points=funding if name == "v2" else None,
-                min_reward_risk=REWARD_RISK_RATIO, fee_percent=FUTURES_TAKER_FEE_PERCENT,
-                max_hold=max_hold, tick_size=tick,
-            )
-        results.append((label, trades))
-
-    progress.empty()
-
-    st.session_state.backtest = {
-        "results": results, "failed": failed, "symbols": list(loaded),
-        "days": days, "max_hold": max_hold, "ran_at": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
-    }
-
-
-report = st.session_state.get("backtest")
 
 if not report:
-    st.info("تنظیمات بالا را انتخاب کن و «اجرای بک‌تست» را بزن. دانلود تاریخچه حدود یک دقیقه طول می‌کشد.")
+    st.info("تنظیمات بالا را انتخاب کن و «اجرای بک‌تست» را بزن. دانلود تاریخچه چند دقیقه طول می‌کشد.")
     st.stop()
 
 st.caption(
-    "اجرا شده در " + report["ran_at"] + " روی " + str(len(report["symbols"])) + " ارز، "
-    + str(report["days"]) + " روز گذشته، حداکثر نگه‌داری " + str(report["max_hold"]) + " ساعت."
+    "آخرین اجرا: " + report["ran_at"] + " روی " + str(len(report["symbols"])) + " ارز، "
+    + str(report["settings"]["days"]) + " روز گذشته، حداکثر نگه‌داری "
+    + str(report["settings"]["max_hold"]) + " ساعت (" + str(report["seconds"]) + " ثانیه طول کشید)."
 )
 
 if report["failed"]:
     with st.expander(str(len(report["failed"])) + " ارز دانلود نشد"):
         for line in report["failed"]:
             st.write(line)
+
+with st.expander("زمان دانلود هر ارز (ثانیه)"):
+    st.json(report["timings"])
 
 summary_rows = []
 for label, trades in report["results"]:
