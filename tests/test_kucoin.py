@@ -272,8 +272,9 @@ def test_backtest_page_runs():
     assert any("مقایسه" in h.value for h in at.subheader)
     summary = at.table[0].value
     assert list(summary["استراتژی"])[0].startswith("خرید افت")
-    assert len(summary) == 9, "the win-rate search compares 9 variants by default"
-    assert "سر‌به‌سر" in summary.columns and "نرخ باخت کامل (٪)" in summary.columns
+    assert len(summary) == 8, "the scale-out comparison has 8 variants and is the default"
+    for column in ("سر‌به‌سر", "نرخ باخت کامل (٪)", "فقط پله‌ی اول", "بسته‌شده با سود (٪)"):
+        assert column in summary.columns
     assert any("به هدف نزدیک‌تر" in h.value for h in at.subheader)
 
 

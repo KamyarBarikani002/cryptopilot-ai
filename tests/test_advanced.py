@@ -254,3 +254,95 @@ def test_build_news_context_with_fake_sources(monkeypatch):
     assert ctx["coin_scores"]["BTC"] > 0
     assert "FOO" in ctx["delisted_coins"]
     assert ctx["trending"][0]["symbol"] == "PEPE"
+
+
+# ---------------------------------------------------------------- خروج پله‌ای
+
+def test_trade_plan_with_scale_out_keeps_one_to_two_on_average():
+    from src.futures.futures_risk import build_trade_plan, net_reward_risk
+    plan = build_trade_plan("LONG", 100.0, 98.0, 1000, 1, 5, min_reward_risk=3.0,
+                            scale_out={"tp1_r": 1.0, "fraction": 0.5})
+    tp1, tp2 = plan["take_profit_1_price"], plan["take_profit_price"]
+    assert 100 < tp1 < tp2
+    assert net_reward_risk("LONG", 100.0, 98.0, tp1, 0.0006) == pytest.approx(1.0, abs=0.01)
+    assert net_reward_risk("LONG", 100.0, 98.0, tp2, 0.0006) == pytest.approx(3.0, abs=0.01)
+    assert plan["reward_risk_ratio"] == pytest.approx(2.0, abs=0.02)
+    assert build_trade_plan("SHORT", 100.0, 102.0, 1000, 1, 5)["take_profit_1_price"] is None
+
+
+def _tps():
+    from src.futures.futures_risk import target_for_r
+    return target_for_r("LONG", 100.0, 98.0, 1.0, 0.0006), target_for_r("LONG", 100.0, 98.0, 3.0, 0.0006)
+
+
+def _scaled(highs, lows):
+    closes = [(h + l) / 2 for h, l in zip(highs, lows)]
+    tp1, tp2 = _tps()
+    return exits.simulate_scaled_exit("LONG", 100.0, 98.0, tp1, tp2, highs, lows, closes,
+                                      0, len(highs), 0.0006)
+
+
+@pytest.mark.parametrize("highs, lows, result, r", [
+    ([101.0, 100.5], [99.0, 97.5], "LOSS", -1.0),            # حد ضرر قبل از پله‌ی اول
+    ([102.5, 101.0], [100.5, 99.5], "PARTIAL", 0.5),          # پله‌ی اول، بعد سر‌به‌سر
+    ([102.5, 107.0], [100.5, 101.0], "WIN", 2.0),             # هر دو پله
+    ([107.0], [100.5], "WIN", 2.0),                           # هر دو در یک کندل
+    ([102.5], [97.0], "LOSS", -1.0),                          # همان کندل هر دو: بدبینانه ضرر
+])
+def test_scaled_exit_outcomes(highs, lows, result, r):
+    out = _scaled(highs, lows)
+    assert out["result"] == result
+    got = exits.scaled_r("LONG", 100.0, 98.0, _tps()[0], 0.5, out["exit_price"],
+                         out["tp1_index"] is not None, 0.0006)
+    assert got == pytest.approx(r, abs=0.03)
+
+
+def test_backtest_scale_out_labels_partial_and_counts_profit_rate():
+    from src.futures import backtest
+    from test_signals import _candles_after_signal
+    # بعد از سیگنال: کمی بالا (پله‌ی اول)، بعد برگشت شدید
+    candles = _candles_after_signal("up", [(1.001, 0.999), (1.06, 1.0), (1.0, 0.8)], shape="dip")
+    trade = backtest.backtest_symbol("T", candles, "dip", min_reward_risk=3.0,
+                                     scale_out={"tp1_r": 1.0, "fraction": 0.5})[-1]
+    assert trade["result"] in ("PARTIAL", "WIN")
+    assert trade["r"] > 0
+    s = backtest.summarize([trade, {"result": "LOSS", "r": -1.0, "closed": "z"}])
+    assert s["profit_rate"] == 50.0 and s["partials"] + s["wins"] == 1
+
+
+def test_tracker_scale_out_partial_and_pnl(monkeypatch):
+    from src.futures import signal_tracker as tracker
+    opened = datetime.now() - timedelta(hours=3)
+    record = {
+        "id": 7, "symbol": "XUSDTM", "direction": "LONG", "score": 50, "entry_price": 100.0,
+        "stop_loss_price": 98.0, "initial_stop_price": 98.0, "take_profit_price": 106.3,
+        "take_profit_1_price": 102.1, "partial_fraction": 0.5,
+        "leverage": 3, "status": "OPEN", "opened_at": str(opened), "closed_at": None, "closed_price": None,
+    }
+    saved = []
+    monkeypatch.setattr(tracker, "load_history", lambda: [dict(record)])
+    monkeypatch.setattr(tracker, "save_history", lambda rows: saved.extend(rows))
+    t = int(opened.timestamp() * 1000)
+    candles = [[t + 3600000, 100, 102.5, 100.2, 102, 1], [t + 7200000, 102, 102.2, 99.0, 99.5, 1]]
+    tracker.update_open_signals(lambda s: {}, candle_fetcher=lambda s, f: candles, breakeven_at_r=1.0)
+    closed = saved[-1]
+    assert closed["status"] == "PARTIAL"
+    # نصف در +۲٫۱٪ و نصف در سر‌به‌سر (حدود +۰٫۱۲٪)
+    assert tracker.calculate_pnl_percent(closed) == pytest.approx(1.11, abs=0.03)
+    stats = tracker.get_stats([closed, {"status": "LOSS"}])
+    assert stats["partials"] == 1 and stats["profit_rate"] == 50.0 and stats["win_rate"] == 0
+
+
+def test_scanner_uses_scale_out_setting(monkeypatch):
+    import config.settings as settings
+    from unittest import mock
+    from fake_kucoin import fake_get
+    from src.futures.scanner import scan_market
+    from src.news.feeds import empty_news_context
+    monkeypatch.setattr(settings, "SCALE_OUT", {"tp1_r": 1.0, "fraction": 0.5})
+    with mock.patch("requests.get", side_effect=fake_get):
+        result = scan_market(top_n=6, capital=200, news_fetcher=empty_news_context)
+    opportunities = result["longs"] + result["shorts"]
+    assert opportunities, "the fake market should produce at least one signal"
+    for o in opportunities:
+        assert o["take_profit_1_price"] is not None and o["reward_risk_ratio"] >= 1.98
