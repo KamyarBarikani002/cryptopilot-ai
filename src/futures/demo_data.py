@@ -36,6 +36,9 @@ def synthetic_candles(direction, n=500, base_price=100.0, start_ms=_DEMO_START_M
     if shape == "dip":
         return _dip_candles(sign, n, base_price, start_ms)
 
+    if shape == "confluence" and sign != 0:
+        return _confluence_candles(sign, n, base_price, start_ms)
+
     pullback = 7
     price = base_price
     candles = []
@@ -61,6 +64,39 @@ def synthetic_candles(direction, n=500, base_price=100.0, start_ms=_DEMO_START_M
             min(open_, close) - wick, close, volume,
         ])
         price = close
+
+    return candles
+
+
+def _confluence_candles(sign, n, base_price, start_ms):
+
+    """
+    الگوی «هم‌گرایی»: روند، رالی، اصلاح تا حمایت (یا مقاومت در Short) و در آخر
+    یک کندل پوشا با حجم بالا در جهت روند.
+    """
+
+    price = base_price
+    candles = []
+    changes = [sign * _WIGGLE[i % len(_WIGGLE)] * 0.4 for i in range(n - 39)]
+    rally_and_pullback = [sign * 0.6] * 12 + [-sign * 0.5] * 14 + [sign * 0.1, -sign * 0.15]
+    changes += rally_and_pullback + [-sign * 0.35] * (40 - len(rally_and_pullback) - 2)
+
+    for i, change in enumerate(changes):
+        open_ = price
+        close = price * (1 + change / 100)
+        wick = abs(close - open_) * 0.3 + price * 0.0008
+        candles.append([start_ms + i * 3_600_000, open_, max(open_, close) + wick,
+                        min(open_, close) - wick, close, 100.0])
+        price = close
+
+    prev_open, prev_close = candles[-1][1], candles[-1][4]
+    t = start_ms + len(changes) * 3_600_000
+    if sign == 1:      # پوشای صعودی با سایه‌ی پایین بلند
+        open_, close = prev_close * 0.999, prev_open * 1.004
+        candles.append([t, open_, close * 1.0008, open_ * 0.985, close, 220.0])
+    else:              # پوشای نزولی با سایه‌ی بالای بلند
+        open_, close = prev_close * 1.001, prev_open * 0.996
+        candles.append([t, open_, open_ * 1.015, close * 0.9992, close, 220.0])
 
     return candles
 
