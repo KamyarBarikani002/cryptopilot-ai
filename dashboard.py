@@ -10,6 +10,8 @@ from config.settings import (
     SCAN_TOP_N,
     SIGNAL_STRATEGY,
     SIGNAL_STRATEGY_HAS_PROVEN_EDGE,
+    BREAKEVEN_AT_R,
+    FUTURES_TAKER_FEE_PERCENT,
 )
 from src.futures.strategy import STRATEGY_TITLES
 from src.futures.scanner import scan_market
@@ -23,7 +25,8 @@ from src.futures.demo_data import (
     demo_turnover_24h
 )
 from src.price_format import format_price
-from src.futures.futures_market_data import get_futures_prices
+from src.futures.futures_market_data import get_futures_prices, get_futures_klines_range
+from src.news.feeds import build_news_context, empty_news_context
 from src.exchange_health import check_kucoin_connectivity
 from src.ui_common import render_storage_status
 from src.futures.risk_budget import daily_budget
@@ -238,7 +241,8 @@ if scan_clicked or should_auto_scan:
                     fear_greed_fetcher=demo_fear_greed_index,
                     tick_size_fetcher=demo_tick_size,
                     risk_percent=risk_percent,
-                    turnover_fetcher=demo_turnover_24h
+                    turnover_fetcher=demo_turnover_24h,
+                    news_fetcher=empty_news_context
                 )
 
             else:
@@ -252,7 +256,15 @@ if scan_clicked or should_auto_scan:
                 # ثبت/به‌روزرسانی تاریخچه فقط برای اسکن واقعی انجام می‌شود؛
                 # حالت آزمایشی هیچ‌وقت به فایل تاریخچه واقعی دست نمی‌زند
                 record_new_signals(result["longs"] + result["shorts"])
-                update_open_signals(get_futures_prices)
+                _now_ms = int(time.time() * 1000)
+                update_open_signals(
+                    get_futures_prices,
+                    candle_fetcher=lambda symbol, from_ms: get_futures_klines_range(
+                        symbol, "1h", from_ms, _now_ms
+                    ),
+                    breakeven_at_r=BREAKEVEN_AT_R,
+                    fee_percent=FUTURES_TAKER_FEE_PERCENT,
+                )
 
             st.session_state.scan_result = result
             st.session_state.scan_error = None
@@ -327,11 +339,20 @@ if result is not None and "fear_greed_index" in result:
 
     st.caption("🌡️ شاخص ترس‌وطمع کل بازار: **" + str(fg_value) + "** (" + fg_label + ")")
 
+if result is not None and result.get("macro_event"):
+    _event = result["macro_event"]
+    st.warning(
+        "📅 خبر مهم اقتصادی آمریکا نزدیک است: **" + _event["title"] + "** ساعت "
+        + _event["time"].strftime("%H:%M UTC")
+        + " — در این بازه سیگنال جدید داده نمی‌شود (نوسان غیرقابل‌پیش‌بینی)."
+    )
 
-tab_long, tab_short, tab_history = st.tabs([
+
+tab_long, tab_short, tab_history, tab_news = st.tabs([
     "📈 فرصت‌های Long" + (" (" + str(len(result["longs"])) + ")" if result else ""),
     "📉 فرصت‌های Short" + (" (" + str(len(result["shorts"])) + ")" if result else ""),
-    "📊 تاریخچه و دقت سیگنال‌ها"
+    "📊 تاریخچه و دقت سیگنال‌ها",
+    "📰 اخبار و رویدادها",
 ])
 
 
@@ -380,6 +401,8 @@ def render_table(opportunities, direction_label):
             "RSI": o["rsi"],
             "فاندینگ (٪)": o["funding_rate_percent"],
             "روند OI (٪)": o["oi_trend_percent"],
+            "امتیاز اخبار": o.get("news_score", 0),
+            "دلایل تکنیکال": "، ".join(o.get("reasons") or []),
         })
 
     st.dataframe(
@@ -406,6 +429,14 @@ else:
 
     with tab_short:
         render_table(result["shorts"], "Short")
+
+    if result.get("blocked"):
+
+        with st.expander("🛑 " + str(len(result["blocked"])) + " سیگنال به خاطر خبر/رویداد کنار گذاشته شد"):
+            st.table([
+                {"ارز": b["symbol"], "جهت": b["direction"], "دلیل": b.get("blocked_reason") or ""}
+                for b in result["blocked"]
+            ])
 
     if result["skipped"]:
 
@@ -436,14 +467,19 @@ with tab_history:
 
         stats = get_stats(history)
 
-        stat_columns = st.columns(6)
+        stat_columns = st.columns(7)
 
         stat_columns[0].metric("کل سیگنال‌ها", stats["total"])
         stat_columns[1].metric("باز", stats["open"])
         stat_columns[2].metric("بسته‌شده", stats["closed"])
         stat_columns[3].metric("برد", stats["wins"])
-        stat_columns[4].metric("باخت", stats["losses"])
-        stat_columns[5].metric("نرخ برد", str(stats["win_rate"]) + "%")
+        stat_columns[4].metric("سر‌به‌سر", stats.get("breakevens", 0))
+        stat_columns[5].metric("باخت", stats["losses"])
+        stat_columns[6].metric("نرخ برد", str(stats["win_rate"]) + "%")
+        st.caption(
+            "سر‌به‌سر: بعد از رسیدن به +۱R حد ضرر به نقطه‌ی ورود رفت و همان‌جا بسته شد "
+            "(بدون سود و زیان). حد ضرر و حد سود روی سقف/کف کندل‌های ۱ ساعته چک می‌شوند."
+        )
 
         st.subheader("سیگنال‌های باز")
 
@@ -458,7 +494,9 @@ with tab_history:
                         "ارز": r["symbol"],
                         "جهت": r["direction"],
                         "قیمت ورود": format_price(r["entry_price"]),
-                        "حد ضرر": format_price(r["stop_loss_price"]),
+                        "حد ضرر": format_price(r["stop_loss_price"])
+                        + (" 🔒 سر‌به‌سر" if r.get("initial_stop_price")
+                           and r["stop_loss_price"] != r["initial_stop_price"] else ""),
                         "حد سود": format_price(r["take_profit_price"]),
                         "زمان باز شدن": r["opened_at"],
                     }
@@ -472,7 +510,7 @@ with tab_history:
 
         closed_records = [
             r for r in history
-            if r["status"] in ("WIN", "LOSS", "EXPIRED")
+            if r["status"] in ("WIN", "LOSS", "BREAKEVEN", "EXPIRED")
         ]
 
         closed_records.sort(
@@ -499,6 +537,80 @@ with tab_history:
                 use_container_width=True,
                 hide_index=True
             )
+
+
+with tab_news:
+
+    st.caption(
+        "منابع بدون کلید: سرخط CoinDesk، Cointelegraph، Decrypt، Bitcoin Magazine و "
+        "CryptoSlate، اطلاعیه‌های لیست/حذف کوکوین، تقویم اخبار مهم اقتصادی آمریکا "
+        "و ارزهای داغ CoinGecko. هر ۱۰ دقیقه تازه می‌شود. اسکنر سیگنالِ ارزی که "
+        "کوکوین حذفش را اعلام کرده، سیگنال خلاف خبرهای خیلی قوی ۲۴ ساعت اخیر، و هر "
+        "سیگنالی در ۲ ساعت قبل تا ۱ ساعت بعد از خبر مهم اقتصادی را کنار می‌گذارد."
+    )
+
+    if demo_mode:
+        st.info("در حالت آزمایشی اخبار گرفته نمی‌شود.")
+    else:
+        with st.spinner("در حال خواندن اخبار..."):
+            try:
+                _news = build_news_context()
+            except Exception as error:
+                _news = None
+                st.error("خواندن اخبار ممکن نشد: " + str(error))
+
+        if _news is not None:
+
+            if _news["errors"]:
+                st.caption("در دسترس نبود: " + "، ".join(_news["errors"]))
+
+            st.subheader("📅 خبرهای مهم اقتصادی آمریکا (این هفته)")
+            if _news["macro_events"]:
+                st.table([
+                    {"زمان (UTC)": e["time"].strftime("%a %d %b %H:%M"), "رویداد": e["title"],
+                     "پیش‌بینی": e["forecast"], "قبلی": e["previous"]}
+                    for e in _news["macro_events"]
+                ])
+            else:
+                st.write("رویداد مهمی ثبت نشده.")
+
+            _scores = sorted(_news["coin_scores"].items(), key=lambda kv: kv[1])
+            if _scores:
+                st.subheader("🧭 حال‌وهوای خبری ارزها (۲۴ ساعت اخیر)")
+                st.table([
+                    {"ارز": coin, "امتیاز خبر": score,
+                     "وضعیت": "🔴 منفی" if score <= -3 else "🟢 مثبت" if score >= 3 else "⚪ خنثی"}
+                    for coin, score in (_scores[:8] + [x for x in _scores[-8:] if x not in _scores[:8]])
+                ])
+
+            _columns = st.columns(2)
+            with _columns[0]:
+                st.subheader("🛑 حذف از کوکوین")
+                for ann in _news["delistings"][:8]:
+                    st.markdown("- [" + ann["title"] + "](" + (ann["url"] or "#") + ")")
+                if not _news["delistings"]:
+                    st.write("—")
+            with _columns[1]:
+                st.subheader("🆕 لیست‌های تازه‌ی کوکوین")
+                for ann in _news["new_listings"][:8]:
+                    st.markdown("- [" + ann["title"] + "](" + (ann["url"] or "#") + ")")
+                if not _news["new_listings"]:
+                    st.write("—")
+
+            if _news["trending"]:
+                st.caption("🔥 داغ در CoinGecko: " + "، ".join(t["symbol"] for t in _news["trending"][:10]))
+
+            st.subheader("📰 آخرین سرخط‌ها")
+            st.table([
+                {
+                    "منبع": h["source"],
+                    "زمان (UTC)": h["published"].strftime("%d %b %H:%M") if h["published"] else "",
+                    "عنوان": h["title"],
+                    "ارزها": " ".join(h.get("coins") or []),
+                    "احساس": h.get("sentiment", 0),
+                }
+                for h in _news["headlines"][:25]
+            ])
 
 
 st.divider()
