@@ -80,3 +80,4 @@ class SignalRecord(Base):
     opened_at = Column(String)
     closed_at = Column(String, nullable=True)
     closed_price = Column(Float, nullable=True)
+    initial_stop_price = Column(Float, nullable=True)   # حد ضرر اولیه (قبل از انتقال به سر‌به‌سر)
