@@ -71,10 +71,12 @@ with st.form("backtest_form"):
     )
     variant_choice = top_columns[1].radio(
         "چه چیزهایی مقایسه شود؟",
-        ["جست‌وجوی گسترده (۱۳ حالت، کندتر)", "مقایسه‌ی سریع (۴ حالت)"],
+        ["افزایش نرخ برد (۹ حالت: هم‌گرایی تکنیکال، سر‌به‌سر)",
+         "جست‌وجوی گسترده (۱۳ حالت، کندتر)", "مقایسه‌ی سریع (۴ حالت)"],
     )
     columns = st.columns(4)
-    columns[0].caption("بازه‌ی زمانی و نگه‌داری:")
+    interval_choice = columns[0].radio("تایم‌فریم کندل", ["۱ ساعته", "۴ ساعته"],
+                                       help="۴ ساعته سیگنال کمتر ولی معمولاً تمیزتر می‌دهد.")
     days = columns[1].slider("چند روز گذشته", 30, 180, 180, step=30)
     max_hold = columns[2].slider("حداکثر نگه‌داری (ساعت)", 12, 168, 72, step=12)
     use_funding = columns[3].checkbox("فیلتر فاندینگ تاریخی", value=True)
@@ -87,7 +89,9 @@ if run:
         {
             "top_n": {"۲۰۰ ارز پرحجم": 200, "۱۰۰ ارز پرحجم": 100, "۳۰ ارز پرحجم": 30}.get(universe_choice, 0),
             "days": days, "max_hold": max_hold, "use_funding": use_funding,
-            "variant_set": "research" if variant_choice.startswith("جست‌وجو") else "quick",
+            "variant_set": "winrate" if variant_choice.startswith("افزایش") else
+            "research" if variant_choice.startswith("جست‌وجو") else "quick",
+            "interval": "4h" if interval_choice.startswith("۴") else "1h",
         },
         {
             "symbols": get_top_symbols_by_volume,
@@ -117,7 +121,8 @@ if not report:
 st.caption(
     "آخرین اجرا: " + report["ran_at"] + " روی " + str(len(report["symbols"])) + " ارز، "
     + str(report["settings"]["days"]) + " روز گذشته، حداکثر نگه‌داری "
-    + str(report["settings"]["max_hold"]) + " ساعت (" + str(report["seconds"]) + " ثانیه طول کشید)."
+    + str(report["settings"]["max_hold"]) + " ساعت، کندل "
+    + report["settings"].get("interval", "1h") + " (" + str(report["seconds"]) + " ثانیه طول کشید)."
 )
 
 if report["failed"]:
@@ -137,8 +142,10 @@ for label, trades in report["results"]:
         "معاملات": s["trades"],
         "برد": s["wins"],
         "باخت": s["losses"],
+        "سر‌به‌سر": s.get("breakevens", 0),
         "بدون نتیجه (تایم‌اوت)": s["timeouts"],
         "نرخ برد (٪)": s["win_rate"],
+        "نرخ باخت کامل (٪)": s.get("loss_rate", 0),
         "میانگین هر معامله (R)": s["avg_r"],
         "مجموع (R)": s["total_r"],
         "Profit factor": s["profit_factor"],
@@ -152,6 +159,8 @@ st.table(summary_rows)
 st.caption(
     "«نیمه‌ی اول/دوم» نتیجه را جدا برای دو نیمه‌ی دوره نشان می‌دهد: استراتژی‌ای "
     "که فقط در یک نیمه سود داده، احتمالاً شانسی بوده. "
+    "«سر‌به‌سر» معامله‌ای است که بعد از رسیدن به +۱R حد ضررش به نقطه‌ی ورود رفت و "
+    "بعد برگشت (نتیجه تقریباً صفر). نرخ برد = برد ÷ کل معاملات. "
     "R یعنی مقدار ریسک هر معامله. با ریسک ۱٪ سرمایه در هر معامله، «مجموع ۱۰R» "
     "یعنی حدود ۱۰٪ سود و «بیشترین افت ۵R» یعنی در بدترین دوره حدود ۵٪ افت."
 )
