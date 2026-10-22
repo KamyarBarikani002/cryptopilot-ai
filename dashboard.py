@@ -388,7 +388,12 @@ def render_table(opportunities, direction_label):
             "اطمینان (۰-۱۰۰)": o["confidence"],
             "قیمت ورود": format_price(o["entry_price"]),
             "حد ضرر": format_price(o["stop_loss_price"]) + "  (-" + str(o["stop_loss_percent"]) + "٪)",
-            "حد سود": format_price(o["take_profit_price"]) + "  (+" + str(o["take_profit_percent"]) + "٪)",
+            "حد سود ۱ (بستن نصف)": (
+                format_price(o["take_profit_1_price"]) + "  (+" + str(o.get("take_profit_1_percent")) + "٪)"
+                if o.get("take_profit_1_price") else "—"
+            ),
+            "حد سود" + (" ۲ (بقیه)" if o.get("take_profit_1_price") else ""):
+                format_price(o["take_profit_price"]) + "  (+" + str(o["take_profit_percent"]) + "٪)",
             "ریسک به ریوارد": "1 : " + format(o["reward_risk_ratio"], ".2f"),
             "اهرم پیشنهادی": str(o["leverage"]) + "x",
             "حجم پوزیشن ($)": o["position_size_usd"],
@@ -467,18 +472,21 @@ with tab_history:
 
         stats = get_stats(history)
 
-        stat_columns = st.columns(7)
+        stat_columns = st.columns(8)
 
         stat_columns[0].metric("کل سیگنال‌ها", stats["total"])
         stat_columns[1].metric("باز", stats["open"])
         stat_columns[2].metric("بسته‌شده", stats["closed"])
-        stat_columns[3].metric("برد", stats["wins"])
-        stat_columns[4].metric("سر‌به‌سر", stats.get("breakevens", 0))
-        stat_columns[5].metric("باخت", stats["losses"])
-        stat_columns[6].metric("نرخ برد", str(stats["win_rate"]) + "%")
+        stat_columns[3].metric("برد کامل", stats["wins"])
+        stat_columns[4].metric("فقط پله‌ی اول", stats.get("partials", 0))
+        stat_columns[5].metric("سر‌به‌سر", stats.get("breakevens", 0))
+        stat_columns[6].metric("باخت", stats["losses"])
+        stat_columns[7].metric("بسته‌شده با سود", str(stats.get("profit_rate", stats["win_rate"])) + "%")
         st.caption(
-            "سر‌به‌سر: بعد از رسیدن به +۱R حد ضرر به نقطه‌ی ورود رفت و همان‌جا بسته شد "
-            "(بدون سود و زیان). حد ضرر و حد سود روی سقف/کف کندل‌های ۱ ساعته چک می‌شوند."
+            "برد کامل: به حد سود اصلی رسید. فقط پله‌ی اول (خروج پله‌ای): نصف پوزیشن در "
+            "حد سود ۱ با سود بسته شد و بقیه سر‌به‌سر. سر‌به‌سر: بعد از +۱R حد ضرر به "
+            "نقطه‌ی ورود رفت و همان‌جا بسته شد. حد ضرر و حد سود روی سقف/کف کندل‌های "
+            "۱ ساعته چک می‌شوند."
         )
 
         st.subheader("سیگنال‌های باز")
@@ -497,6 +505,7 @@ with tab_history:
                         "حد ضرر": format_price(r["stop_loss_price"])
                         + (" 🔒 سر‌به‌سر" if r.get("initial_stop_price")
                            and r["stop_loss_price"] != r["initial_stop_price"] else ""),
+                        "حد سود ۱": format_price(r["take_profit_1_price"]) if r.get("take_profit_1_price") else "—",
                         "حد سود": format_price(r["take_profit_price"]),
                         "زمان باز شدن": r["opened_at"],
                     }
@@ -510,7 +519,7 @@ with tab_history:
 
         closed_records = [
             r for r in history
-            if r["status"] in ("WIN", "LOSS", "BREAKEVEN", "EXPIRED")
+            if r["status"] in ("WIN", "LOSS", "BREAKEVEN", "PARTIAL", "EXPIRED")
         ]
 
         closed_records.sort(
@@ -526,7 +535,8 @@ with tab_history:
                     {
                         "ارز": r["symbol"],
                         "جهت": r["direction"],
-                        "نتیجه": r["status"],
+                        "نتیجه": {"WIN": "✅ برد", "PARTIAL": "🟢 پله‌ی اول", "BREAKEVEN": "⚪ سر‌به‌سر",
+                                  "LOSS": "❌ باخت", "EXPIRED": "⌛ منقضی"}.get(r["status"], r["status"]),
                         "قیمت ورود": format_price(r["entry_price"]),
                         "قیمت خروج": format_price(r["closed_price"]),
                         "سود/زیان (٪)": calculate_pnl_percent(r),
