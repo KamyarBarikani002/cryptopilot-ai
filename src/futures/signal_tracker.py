@@ -21,6 +21,8 @@ def _row_to_dict(row):
         "closed_at": row.closed_at,
         "closed_price": row.closed_price,
         "initial_stop_price": row.initial_stop_price,
+        "take_profit_1_price": row.take_profit_1_price,
+        "partial_fraction": row.partial_fraction,
     }
 
 
@@ -85,6 +87,8 @@ def save_history(history):
                     closed_at=record.get("closed_at"),
                     closed_price=record.get("closed_price"),
                     initial_stop_price=record.get("initial_stop_price", record["stop_loss_price"]),
+                    take_profit_1_price=record.get("take_profit_1_price"),
+                    partial_fraction=record.get("partial_fraction"),
                 ))
 
         session.commit()
@@ -143,6 +147,8 @@ def record_new_signals(opportunities):
             "closed_at": None,
             "closed_price": None,
             "initial_stop_price": opportunity["stop_loss_price"],
+            "take_profit_1_price": opportunity.get("take_profit_1_price"),
+            "partial_fraction": opportunity.get("partial_fraction"),
         })
 
         added += 1
@@ -178,7 +184,7 @@ def update_open_signals(price_fetcher, candle_fetcher=None, breakeven_at_r=None,
     - سیگنالی که خیلی وقت باز مانده EXPIRED می‌شود.
     """
 
-    from src.futures.exits import breakeven_price, simulate_exit
+    from src.futures.exits import breakeven_price, simulate_exit, simulate_scaled_exit
 
     history = load_history()
     open_records = [record for record in history if record["status"] == "OPEN"]
@@ -214,7 +220,20 @@ def update_open_signals(price_fetcher, candle_fetcher=None, breakeven_at_r=None,
             except Exception:
                 candles = []
 
-            if candles:
+            if candles and record.get("take_profit_1_price"):
+                # خروج پله‌ای: همیشه از حد ضرر اولیه دوباره شبیه‌سازی می‌شود
+                exit_info = simulate_scaled_exit(
+                    record["direction"], record["entry_price"], replay_stop,
+                    record["take_profit_1_price"], record["take_profit_price"],
+                    [c[2] for c in candles], [c[3] for c in candles], [c[4] for c in candles],
+                    0, len(candles), fee_rate,
+                )
+                if exit_info["result"] != "OPEN":
+                    outcome, closed_price = exit_info["result"], exit_info["exit_price"]
+                elif exit_info["tp1_index"] is not None:
+                    record["stop_loss_price"] = exit_info["current_stop"]
+
+            elif candles:
                 exit_info = simulate_exit(
                     record["direction"], record["entry_price"], replay_stop,
                     record["take_profit_price"],
@@ -236,16 +255,20 @@ def update_open_signals(price_fetcher, candle_fetcher=None, breakeven_at_r=None,
             moved = abs(record["stop_loss_price"] - breakeven_price(
                 record["direction"], record["entry_price"], fee_rate)) <= 1e-9 * record["entry_price"]
 
+            stopped_label = "LOSS"
+            if moved:
+                stopped_label = "PARTIAL" if record.get("take_profit_1_price") else "BREAKEVEN"
+
             if long_:
                 if current_price >= record["take_profit_price"]:
                     outcome = "WIN"
                 elif current_price <= record["stop_loss_price"]:
-                    outcome = "BREAKEVEN" if moved else "LOSS"
+                    outcome = stopped_label
             else:
                 if current_price <= record["take_profit_price"]:
                     outcome = "WIN"
                 elif current_price >= record["stop_loss_price"]:
-                    outcome = "BREAKEVEN" if moved else "LOSS"
+                    outcome = stopped_label
 
             closed_price = current_price
 
@@ -267,24 +290,27 @@ def update_open_signals(price_fetcher, candle_fetcher=None, breakeven_at_r=None,
     return len(updated_records)
 
 
+def _change_percent(record, price):
+
+    sign = 1 if record["direction"] == "LONG" else -1
+    return sign * (price - record["entry_price"]) / record["entry_price"] * 100
+
+
 def calculate_pnl_percent(record):
+
+    """
+    درصد تغییر قیمت به نفع پوزیشن (بدون اهرم). در خروج پله‌ای، اگر پله‌ی اول
+    گرفته شده باشد، میانگین وزنی پله‌ی اول و بقیه‌ی پوزیشن است.
+    """
 
     if record["closed_price"] is None:
         return None
 
-    if record["direction"] == "LONG":
+    change = _change_percent(record, record["closed_price"])
 
-        change = (
-            (record["closed_price"] - record["entry_price"])
-            / record["entry_price"]
-        ) * 100
-
-    else:
-
-        change = (
-            (record["entry_price"] - record["closed_price"])
-            / record["entry_price"]
-        ) * 100
+    if record.get("take_profit_1_price") and record["status"] in ("WIN", "PARTIAL"):
+        fraction = record.get("partial_fraction") or 0.5
+        change = fraction * _change_percent(record, record["take_profit_1_price"]) + (1 - fraction) * change
 
     return round(change, 2)
 
@@ -296,7 +322,7 @@ def get_stats(history=None):
     closed = [
         record
         for record in history
-        if record["status"] in ("WIN", "LOSS", "BREAKEVEN")
+        if record["status"] in ("WIN", "LOSS", "BREAKEVEN", "PARTIAL")
     ]
 
     wins = [
@@ -306,9 +332,12 @@ def get_stats(history=None):
     ]
 
     win_rate = 0
+    profit_rate = 0
+    partials = [r for r in closed if r["status"] == "PARTIAL"]
 
     if closed:
         win_rate = round(len(wins) / len(closed) * 100, 2)
+        profit_rate = round((len(wins) + len(partials)) / len(closed) * 100, 2)
 
     return {
         "total": len(history),
@@ -317,6 +346,9 @@ def get_stats(history=None):
         "wins": len(wins),
         "losses": len([r for r in closed if r["status"] == "LOSS"]),
         "breakevens": len([r for r in closed if r["status"] == "BREAKEVEN"]),
+        "partials": len(partials),
         "expired": len([r for r in history if r["status"] == "EXPIRED"]),
-        "win_rate": win_rate
+        "win_rate": win_rate,
+        # برد کامل + پله‌ی اول (معاملاتی که با سود بسته شدند)
+        "profit_rate": profit_rate,
     }

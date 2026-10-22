@@ -59,14 +59,37 @@ WINRATE_VARIANTS = [
     ("شکست ۴۸ کندلی، نسبت ۱ به ۳ + سر‌به‌سر", "breakout", {}, 3.0, BE),
 ]
 
-VARIANT_SETS = {"quick": QUICK_VARIANTS, "research": RESEARCH_VARIANTS, "winrate": WINRATE_VARIANTS}
+# خروج پله‌ای: نصف پوزیشن در ۱R بسته می‌شود، حد ضرر بقیه سر‌به‌سر، بقیه تا ۳R.
+# میانگین سود یک برد کامل = ۰٫۵×۱ + ۰٫۵×۳ = ۲R (همان قانون ۱ به ۲).
+SCALE = {"scale_out": {"tp1_r": 1.0, "fraction": 0.5}}
+SCALE_OUT_VARIANTS = [
+    ("خرید افت (فعلی، خروج ساده ۲R)", "dip", {}, 2.0),
+    ("خرید افت + خروج پله‌ای", "dip", {}, 3.0, SCALE),
+    ("هم‌گرایی + خروج پله‌ای", "confluence", {}, 3.0, SCALE),
+    ("هم‌گرایی سخت‌گیرانه (۳ تأیید) + خروج پله‌ای", "confluence", {"min_confirmations": 3}, 3.0, SCALE),
+    ("هم‌گرایی سخت‌گیرانه + سر‌به‌سر (بدون پله)", "confluence", {"min_confirmations": 3}, 2.0, BE),
+    ("هم‌گرایی بدون فیلتر روند + خروج پله‌ای", "confluence", {"use_trend_filter": False}, 3.0, SCALE),
+    ("پولبک در جهت روند + خروج پله‌ای", "pullback", {}, 3.0, SCALE),
+    ("شکست ۴۸ کندلی + خروج پله‌ای", "breakout", {}, 3.0, SCALE),
+]
+
+VARIANT_SETS = {"quick": QUICK_VARIANTS, "research": RESEARCH_VARIANTS, "winrate": WINRATE_VARIANTS,
+                "scaleout": SCALE_OUT_VARIANTS}
 INTERVAL_HOURS = {"1h": 1, "4h": 4}
 
 
 def unpack_variant(variant):
-    """(label, name, params, rr, breakeven_at_r یا None)"""
+    """
+    (label, name, params, rr, options). ردیف پنجم اختیاری است: یا یک عدد
+    (انتقال به سر‌به‌سر بعد از چند R) یا dict مثل {"scale_out": {...}}.
+    """
     label, name, params, rr, *rest = variant
-    return label, name, params, rr, (rest[0] if rest else None)
+    extra = rest[0] if rest else None
+    if isinstance(extra, dict):
+        options = dict(extra)
+    else:
+        options = {"breakeven_at_r": extra} if extra is not None else {}
+    return label, name, params, rr, options
 STRATEGY_VARIANTS = QUICK_VARIANTS   # نام قدیمی، برای سازگاری
 
 
@@ -159,9 +182,9 @@ class BacktestJob:
                     symbol, rows, name, params,
                     funding_points=funding,
                     min_reward_risk=max(rr, REWARD_RISK_RATIO), fee_percent=FUTURES_TAKER_FEE_PERCENT,
-                    max_hold=hold_candles, tick_size=tick, breakeven_at_r=be,
+                    max_hold=hold_candles, tick_size=tick, **options,
                 )
-                for label, name, params, rr, be in variants
+                for label, name, params, rr, options in variants
             } if len(rows) else {}
             return per_variant, problems, round(time.time() - t0, 1)
 

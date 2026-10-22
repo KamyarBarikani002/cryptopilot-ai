@@ -79,6 +79,28 @@ def net_reward_risk(direction, entry_price, stop_price, take_profit_price, fee_r
     return gain / loss if loss > 0 else 0.0
 
 
+def target_for_r(direction, entry_price, stop_price, reward_r, fee_rate, tick_size=None):
+
+    """
+    قیمتی که سود خالص (بعد از کارمزد ورود و خروج) در آن دقیقاً reward_r برابر
+    زیان خالص حد ضرر باشد. رو به دورتر گرد می‌شود تا نسبت هیچ‌وقت کمتر نشود.
+    """
+
+    from src.price_format import round_to_tick
+
+    needed_gain = reward_r * _loss_per_unit(entry_price, stop_price, fee_rate)
+
+    if direction == "LONG":
+        price = (needed_gain + entry_price * (1 + fee_rate)) / (1 - fee_rate)
+        return round_to_tick(price, tick_size, "up")
+
+    price = (entry_price * (1 - fee_rate) - needed_gain) / (1 + fee_rate)
+    price = round_to_tick(price, tick_size, "down")
+    if price <= 0:
+        raise ValueError("take profit would be below zero")
+    return price
+
+
 def build_trade_plan(
     direction,
     entry_price,
@@ -89,6 +111,7 @@ def build_trade_plan(
     min_reward_risk=2.0,
     fee_percent=0.06,
     tick_size=None,
+    scale_out=None,
 ):
 
     """
@@ -118,16 +141,7 @@ def build_trade_plan(
         raise ValueError("stop must be on the losing side of the entry")
 
     loss = _loss_per_unit(entry_price, stop_price, fee_rate)
-    needed_gain = min_reward_risk * loss
-
-    if direction == "LONG":
-        take_profit = (needed_gain + entry_price * (1 + fee_rate)) / (1 - fee_rate)
-        take_profit = round_to_tick(take_profit, tick_size, "up")
-    else:
-        take_profit = (entry_price * (1 - fee_rate) - needed_gain) / (1 + fee_rate)
-        take_profit = round_to_tick(take_profit, tick_size, "down")
-        if take_profit <= 0:
-            raise ValueError("take profit would be below zero")
+    take_profit = target_for_r(direction, entry_price, stop_price, min_reward_risk, fee_rate, tick_size)
 
     stop_loss_percent = abs(entry_price - stop_price) / entry_price * 100
 
@@ -138,7 +152,7 @@ def build_trade_plan(
     leverage = suggest_leverage(stop_loss_percent, max_leverage)
     position_size = min(position_size, capital * leverage)
 
-    return {
+    plan = {
         "entry_price": entry_price,
         "stop_loss_price": stop_price,
         "take_profit_price": take_profit,
@@ -150,4 +164,20 @@ def build_trade_plan(
         "margin_required_usd": round(position_size / leverage, 2),
         "risk_amount_usd": round(risk_amount, 2),
         "fee_percent": fee_percent,
+        "take_profit_1_price": None,
+        "partial_fraction": None,
     }
+
+    if scale_out:
+        # خروج پله‌ای: بخشی از پوزیشن در tp1_r بسته می‌شود و حد ضرر بقیه به
+        # نقطه‌ی سر‌به‌سر می‌رود؛ بقیه تا حد سود اصلی (min_reward_risk) می‌ماند.
+        tp1 = target_for_r(direction, entry_price, stop_price, scale_out["tp1_r"], fee_rate, tick_size)
+        fraction = scale_out["fraction"]
+        plan["take_profit_1_price"] = tp1
+        plan["partial_fraction"] = fraction
+        plan["take_profit_1_percent"] = round(abs(tp1 - entry_price) / entry_price * 100, 2)
+        plan["reward_risk_ratio"] = round(
+            fraction * net_reward_risk(direction, entry_price, stop_price, tp1, fee_rate)
+            + (1 - fraction) * net_reward_risk(direction, entry_price, stop_price, take_profit, fee_rate), 2)
+
+    return plan

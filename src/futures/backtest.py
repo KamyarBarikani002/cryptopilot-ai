@@ -19,7 +19,7 @@ import bisect
 from datetime import datetime, timezone
 
 from src.futures import strategy
-from src.futures.exits import simulate_exit
+from src.futures.exits import scaled_r, simulate_exit, simulate_scaled_exit
 from src.futures.futures_risk import _loss_per_unit, build_trade_plan
 
 
@@ -67,7 +67,12 @@ def backtest_symbol(
     max_hold=72,
     tick_size=None,
     breakeven_at_r=None,
+    scale_out=None,
 ):
+    """
+    scale_out: مثل {"tp1_r": 1.0, "fraction": 0.5} یعنی نصف پوزیشن در ۱R بسته
+    شود و بقیه (با حد ضرر سر‌به‌سر) تا حد سود اصلی (min_reward_risk) بماند.
+    """
 
     signal_fn = STRATEGIES[strategy_name]
     data = strategy.compute_indicators(candles)
@@ -91,6 +96,7 @@ def backtest_symbol(
                 signal["direction"], signal["entry"], signal["stop"],
                 capital=1000, risk_percent=1, max_leverage=5,
                 min_reward_risk=min_reward_risk, fee_percent=fee_percent, tick_size=tick_size,
+                scale_out=scale_out,
             )
         except ValueError:
             i += 1
@@ -100,20 +106,37 @@ def backtest_symbol(
         long_ = signal["direction"] == "LONG"
         loss_unit = _loss_per_unit(entry, stop, fee_rate)
 
-        outcome = simulate_exit(
-            signal["direction"], entry, stop, target,
-            data["high"], data["low"], data["close"],
-            i + 1, min(i + 1 + max_hold, n), fee_rate, breakeven_at_r,
-        )
+        if scale_out:
+            tp1 = plan["take_profit_1_price"]
+            outcome = simulate_scaled_exit(
+                signal["direction"], entry, stop, tp1, target,
+                data["high"], data["low"], data["close"],
+                i + 1, min(i + 1 + max_hold, n), fee_rate,
+            )
+            tp1_taken = outcome["tp1_index"] is not None
+            result = outcome["result"]
+            if result == "OPEN":
+                result = "PARTIAL" if tp1_taken else "TIMEOUT"
+        else:
+            outcome = simulate_exit(
+                signal["direction"], entry, stop, target,
+                data["high"], data["low"], data["close"],
+                i + 1, min(i + 1 + max_hold, n), fee_rate, breakeven_at_r,
+            )
+            result = "TIMEOUT" if outcome["result"] == "OPEN" else outcome["result"]
+
         j = outcome["exit_index"]
         exit_price = outcome["exit_price"]
-        result = "TIMEOUT" if outcome["result"] == "OPEN" else outcome["result"]
 
         if exit_price is None:   # آخرین کندل داده؛ چیزی بعدش نیست
             break
 
-        move = (exit_price - entry) if long_ else (entry - exit_price)
-        r = (move - fee_rate * (entry + exit_price)) / loss_unit
+        if scale_out:
+            r = scaled_r(signal["direction"], entry, stop, tp1, scale_out["fraction"],
+                         exit_price, tp1_taken, fee_rate)
+        else:
+            move = (exit_price - entry) if long_ else (entry - exit_price)
+            r = (move - fee_rate * (entry + exit_price)) / loss_unit
 
         trades.append({
             "symbol": symbol,
@@ -153,13 +176,15 @@ def summarize(trades):
     total = len(trades)
 
     if total == 0:
-        return {"trades": 0, "wins": 0, "losses": 0, "breakevens": 0, "timeouts": 0,
-                "win_rate": 0.0, "loss_rate": 0.0,
+        return {"trades": 0, "wins": 0, "losses": 0, "breakevens": 0, "partials": 0, "timeouts": 0,
+                "win_rate": 0.0, "loss_rate": 0.0, "profit_rate": 0.0,
                 "avg_r": 0.0, "total_r": 0.0, "profit_factor": 0.0, "max_drawdown_r": 0.0}
 
     wins = sum(1 for t in trades if t["result"] == "WIN")
     losses = sum(1 for t in trades if t["result"] == "LOSS")
     breakevens = sum(1 for t in trades if t["result"] == "BREAKEVEN")
+    partials = sum(1 for t in trades if t["result"] == "PARTIAL")
+    in_profit = sum(1 for t in trades if t["r"] > 0)
     gross_win = sum(t["r"] for t in trades if t["r"] > 0)
     gross_loss = -sum(t["r"] for t in trades if t["r"] < 0)
 
@@ -176,8 +201,11 @@ def summarize(trades):
         "wins": wins,
         "losses": losses,
         "breakevens": breakevens,
-        "timeouts": total - wins - losses - breakevens,
+        "partials": partials,
+        "timeouts": total - wins - losses - breakevens - partials,
         "win_rate": round(wins / total * 100, 1),
+        # معاملاتی که در نهایت با سود بسته شدند (برد کامل یا پله‌ی اول)
+        "profit_rate": round(in_profit / total * 100, 1),
         "loss_rate": round(losses / total * 100, 1),
         "avg_r": round(total_r / total, 3),
         "total_r": round(total_r, 2),

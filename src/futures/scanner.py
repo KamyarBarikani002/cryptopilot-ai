@@ -22,6 +22,7 @@ from config.settings import (
     SIGNAL_STRATEGY,
     SIGNAL_STRATEGY_PARAMS,
 )
+import config.settings as _settings
 from src.futures import strategy
 from src.futures.fundamental_engine import (
     calculate_fundamental_score,
@@ -159,9 +160,10 @@ def scan_symbol(
         capital,
         risk_percent,
         MAX_LEVERAGE,
-        min_reward_risk=REWARD_RISK_RATIO,
+        min_reward_risk=_settings.SCALE_OUT_TARGET_R if _settings.SCALE_OUT else REWARD_RISK_RATIO,
         fee_percent=FUTURES_TAKER_FEE_PERCENT,
         tick_size=_safe(tick_size_fetcher, symbol, None),
+        scale_out=_settings.SCALE_OUT,
     )
 
     opportunity = {

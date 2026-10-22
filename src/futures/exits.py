@@ -60,3 +60,66 @@ def simulate_exit(direction, entry, stop, target, highs, lows, closes,
     last = end - 1 if end > start else start
     return {"result": "OPEN", "exit_price": closes[last] if end > start else None,
             "exit_index": last, "current_stop": current_stop, "moved_to_breakeven": moved}
+
+
+def simulate_scaled_exit(direction, entry, stop, tp1, tp2, highs, lows, closes,
+                         start, end, fee_rate):
+
+    """
+    خروج پله‌ای: بخشی از پوزیشن در tp1 بسته می‌شود؛ از کندل بعد حد ضرر بقیه
+    به نقطه‌ی سر‌به‌سر می‌رود و بقیه تا tp2 می‌ماند.
+
+    result:
+      LOSS     حد ضرر قبل از tp1 (کل پوزیشن، −1R)
+      WIN      هر دو پله (tp1 و tp2)
+      PARTIAL  tp1 گرفته شد، بقیه در سر‌به‌سر بسته شد
+      OPEN     هنوز تمام نشده (tp1_hit می‌گوید پله‌ی اول گرفته شده یا نه)
+    خروجی شامل tp1_index، exit_price و exit_index (برای بقیه‌ی پوزیشن) هم هست.
+    """
+
+    long_ = direction == "LONG"
+    current_stop = stop
+    tp1_index = None
+
+    for j in range(start, end):
+
+        hit_stop = lows[j] <= current_stop if long_ else highs[j] >= current_stop
+        hit_tp1 = highs[j] >= tp1 if long_ else lows[j] <= tp1
+        hit_tp2 = highs[j] >= tp2 if long_ else lows[j] <= tp2
+
+        if hit_stop:
+            # اگر در همان کندل هم حد ضرر و هم حد سود لمس شده، بدبینانه حد ضرر
+            return {"result": "PARTIAL" if tp1_index is not None else "LOSS",
+                    "exit_price": current_stop, "exit_index": j, "tp1_index": tp1_index,
+                    "current_stop": current_stop}
+
+        if tp1_index is None and hit_tp1:
+            tp1_index = j
+            if hit_tp2:
+                return {"result": "WIN", "exit_price": tp2, "exit_index": j,
+                        "tp1_index": j, "current_stop": current_stop}
+            current_stop = breakeven_price(direction, entry, fee_rate)
+            continue
+
+        if tp1_index is not None and hit_tp2:
+            return {"result": "WIN", "exit_price": tp2, "exit_index": j,
+                    "tp1_index": tp1_index, "current_stop": current_stop}
+
+    last = end - 1 if end > start else start
+    return {"result": "OPEN", "exit_price": closes[last] if end > start else None,
+            "exit_index": last, "tp1_index": tp1_index, "current_stop": current_stop}
+
+
+def scaled_r(direction, entry, stop, tp1, fraction, exit_price, tp1_taken, fee_rate):
+
+    """نتیجه به واحد R برای خروج پله‌ای (با کارمزد هر بخش)."""
+
+    loss_unit = abs(entry - stop) + fee_rate * (entry + stop)
+
+    def leg(price):
+        move = (price - entry) if direction == "LONG" else (entry - price)
+        return (move - fee_rate * (entry + price)) / loss_unit
+
+    if not tp1_taken:
+        return leg(exit_price)
+    return fraction * leg(tp1) + (1 - fraction) * leg(exit_price)
