@@ -220,6 +220,17 @@ def test_dca_page_renders_with_kucoin_prices():
     assert not price_warnings, price_warnings
 
 
+def test_dashboard_news_tab_lists_headlines():
+    from src.news import feeds
+    feeds._cache.update(at=0.0, value=None)
+    at = _app("dashboard.py")
+    at.run(timeout=60)
+    assert not at.exception
+    assert any("آخرین سرخط‌ها" in h.value for h in at.subheader)
+    flat = " ".join(str(v) for t in at.table for v in t.value.to_dict("records"))
+    assert "Bitcoin ETF inflows" in flat
+
+
 def test_storage_status_warns_while_data_is_only_in_sqlite():
     at = _app("dashboard.py")
     at.run(timeout=60)
@@ -261,7 +272,8 @@ def test_backtest_page_runs():
     assert any("مقایسه" in h.value for h in at.subheader)
     summary = at.table[0].value
     assert list(summary["استراتژی"])[0].startswith("خرید افت")
-    assert len(summary) == 13, "the broad search compares 13 variants by default"
+    assert len(summary) == 9, "the win-rate search compares 9 variants by default"
+    assert "سر‌به‌سر" in summary.columns and "نرخ باخت کامل (٪)" in summary.columns
     assert any("به هدف نزدیک‌تر" in h.value for h in at.subheader)
 
 

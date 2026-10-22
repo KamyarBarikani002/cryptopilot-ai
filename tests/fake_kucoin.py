@@ -83,7 +83,7 @@ def _resp(status, payload):
     return r
 
 
-def fake_get(url, params=None, timeout=None):
+def fake_get(url, params=None, timeout=None, **kwargs):
     CALLS.append((url, dict(params or {}), timeout))
     params = params or {}
     ok = lambda data: _resp(200, {"code": "200000", "data": data})
@@ -105,4 +105,34 @@ def fake_get(url, params=None, timeout=None):
         return ok(OI_HISTORY[: int(params.get("pageSize", 7))])
     if "alternative.me" in url:
         return _resp(200, {"data": [{"value": "55"}]})
+    # منابع خبری (بدون کلید)
+    from src.news import feeds
+    if url in feeds.RSS_FEEDS.values():
+        r = _resp(200, None)
+        r.content = RSS_SAMPLE.encode()
+        return r
+    if url == feeds.KUCOIN_ANNOUNCEMENTS_URL:
+        items = DELISTINGS if params.get("annType") == "delistings" else []
+        return ok({"items": items})
+    if url == feeds.MACRO_CALENDAR_URL:
+        return _resp(200, [])
+    if url == feeds.COINGECKO_TRENDING_URL:
+        return _resp(200, {"coins": [{"item": {"symbol": "pepe", "name": "Pepe"}}]})
     raise AssertionError("unexpected URL in test: " + url)
+
+
+RSS_SAMPLE = """<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+<item><title>Bitcoin ETF inflows surge to record high</title><link>https://example.com/a</link>
+<pubDate>{now}</pubDate><description>BTC demand</description></item>
+</channel></rss>"""
+
+DELISTINGS = []
+
+
+def _rfc822_now():
+    from email.utils import format_datetime
+    from datetime import datetime, timezone
+    return format_datetime(datetime.now(timezone.utc))
+
+
+RSS_SAMPLE = RSS_SAMPLE.replace("{now}", _rfc822_now())
