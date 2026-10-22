@@ -63,6 +63,10 @@ SIGNAL_STRATEGY_HAS_PROVEN_EDGE = False
 SIGNAL_STRATEGY = "dip"
 SIGNAL_STRATEGY_PARAMS = {}
 
+# مدیریت خروج: وقتی قیمت به اندازه‌ی ۱ برابر ریسک (+1R) به سود رفت، حد ضرر به
+# نقطه‌ی سر‌به‌سر (ورود + کارمزد) منتقل می‌شود. None = غیرفعال.
+BREAKEVEN_AT_R = 1.0
+
 # چند کندل ۱ ساعته برای تحلیل گرفته شود (EMA200 و روند ۴ ساعته به ~۲۶۰ کندل نیاز دارند)
 SCAN_CANDLES = 500
 
