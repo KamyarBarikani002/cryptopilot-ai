@@ -19,7 +19,8 @@ def _row_to_dict(row):
         "status": row.status,
         "opened_at": row.opened_at,
         "closed_at": row.closed_at,
-        "closed_price": row.closed_price
+        "closed_price": row.closed_price,
+        "initial_stop_price": row.initial_stop_price,
     }
 
 
@@ -65,6 +66,7 @@ def save_history(history):
 
                 row = existing_by_id[record_id]
                 row.status = record["status"]
+                row.stop_loss_price = record["stop_loss_price"]   # ممکن است به سر‌به‌سر رفته باشد
                 row.closed_at = record["closed_at"]
                 row.closed_price = record["closed_price"]
 
@@ -81,7 +83,8 @@ def save_history(history):
                     status=record["status"],
                     opened_at=record["opened_at"],
                     closed_at=record.get("closed_at"),
-                    closed_price=record.get("closed_price")
+                    closed_price=record.get("closed_price"),
+                    initial_stop_price=record.get("initial_stop_price", record["stop_loss_price"]),
                 ))
 
         session.commit()
@@ -138,7 +141,8 @@ def record_new_signals(opportunities):
             "status": "OPEN",
             "opened_at": str(datetime.now()),
             "closed_at": None,
-            "closed_price": None
+            "closed_price": None,
+            "initial_stop_price": opportunity["stop_loss_price"],
         })
 
         added += 1
@@ -156,66 +160,105 @@ def _is_expired(record):
     return datetime.now() - opened_at > timedelta(days=SIGNAL_MAX_OPEN_DAYS)
 
 
-def update_open_signals(price_fetcher):
+def _opened_ms(record):
+
+    return int(datetime.fromisoformat(record["opened_at"]).timestamp() * 1000)
+
+
+def update_open_signals(price_fetcher, candle_fetcher=None, breakeven_at_r=None, fee_percent=0.06):
 
     """
-    price_fetcher باید یک تابع باشد که لیستی از نمادها می‌گیرد و دیکشنری
-    {symbol: price} برمی‌گرداند (مثل get_futures_prices).
+    سیگنال‌های باز را به‌روز می‌کند.
 
-    هر سیگنال باز رو با قیمت فعلی چک می‌کند: اگر به حد سود یا حد ضرر رسیده
-    باشد به‌عنوان WIN/LOSS بسته می‌شود؛ اگر خیلی وقته باز مانده، EXPIRED می‌شود.
+    - اگر candle_fetcher داده شود (symbol, from_ms) -> کندل‌های بسته‌شده‌ی ۱ ساعته
+      از زمان ثبت سیگنال: حد سود/ضرر روی high/low همه‌ی کندل‌ها چک می‌شود (قبلاً
+      فقط قیمت لحظه‌ی اسکن دیده می‌شد و برخورد بین دو اسکن از دست می‌رفت).
+      انتقال به سر‌به‌سر هم دقیقاً مثل بک‌تست انجام می‌شود.
+    - بعد قیمت لحظه‌ای (price_fetcher) هم با حد ضرر/سود فعلی مقایسه می‌شود.
+    - سیگنالی که خیلی وقت باز مانده EXPIRED می‌شود.
     """
+
+    from src.futures.exits import breakeven_price, simulate_exit
 
     history = load_history()
-
-    open_records = [
-        record
-        for record in history
-        if record["status"] == "OPEN"
-    ]
+    open_records = [record for record in history if record["status"] == "OPEN"]
 
     if not open_records:
         return 0
 
-    symbols = list({record["symbol"] for record in open_records})
-
     try:
-        prices = price_fetcher(symbols)
+        prices = price_fetcher(list({record["symbol"] for record in open_records}))
     except Exception:
-        return 0
+        prices = {}
 
+    fee_rate = fee_percent / 100
     updated_records = []
 
     for record in open_records:
 
+        outcome, closed_price = None, None
+        long_ = record["direction"] == "LONG"
+        stop_before = record["stop_loss_price"]
+        initial_stop = record.get("initial_stop_price")
+        already_moved = abs(stop_before - breakeven_price(
+            record["direction"], record["entry_price"], fee_rate)) <= 1e-9 * record["entry_price"]
+        # با حد ضرر اولیه، کل مسیر از ابتدا دوباره دقیقاً مثل بک‌تست شبیه‌سازی می‌شود.
+        # سیگنال‌های قدیمی که حد ضرر اولیه ندارند، از حد ضرر فعلی ادامه می‌دهند.
+        replay_stop = initial_stop if initial_stop else stop_before
+        replay_from_start = bool(initial_stop)
+
+        if candle_fetcher is not None:
+            try:
+                opened_ms = _opened_ms(record)
+                candles = [c for c in candle_fetcher(record["symbol"], opened_ms) if c[0] >= opened_ms]
+            except Exception:
+                candles = []
+
+            if candles:
+                exit_info = simulate_exit(
+                    record["direction"], record["entry_price"], replay_stop,
+                    record["take_profit_price"],
+                    [c[2] for c in candles], [c[3] for c in candles], [c[4] for c in candles],
+                    0, len(candles), fee_rate,
+                    breakeven_at_r if (replay_from_start or not already_moved) else None,
+                )
+                if exit_info["result"] != "OPEN":
+                    outcome, closed_price = exit_info["result"], exit_info["exit_price"]
+                    if already_moved and not replay_from_start and outcome == "LOSS":
+                        outcome = "BREAKEVEN"
+                elif exit_info["moved_to_breakeven"]:
+                    record["stop_loss_price"] = exit_info["current_stop"]
+
         current_price = prices.get(record["symbol"])
 
-        outcome = None
+        if outcome is None and current_price is not None:
 
-        if current_price is not None:
+            moved = abs(record["stop_loss_price"] - breakeven_price(
+                record["direction"], record["entry_price"], fee_rate)) <= 1e-9 * record["entry_price"]
 
-            if record["direction"] == "LONG":
-
+            if long_:
                 if current_price >= record["take_profit_price"]:
                     outcome = "WIN"
                 elif current_price <= record["stop_loss_price"]:
-                    outcome = "LOSS"
-
-            else:  # SHORT
-
+                    outcome = "BREAKEVEN" if moved else "LOSS"
+            else:
                 if current_price <= record["take_profit_price"]:
                     outcome = "WIN"
                 elif current_price >= record["stop_loss_price"]:
-                    outcome = "LOSS"
+                    outcome = "BREAKEVEN" if moved else "LOSS"
+
+            closed_price = current_price
 
         if outcome is None and _is_expired(record):
             outcome = "EXPIRED"
-            current_price = current_price if current_price is not None else record["entry_price"]
+            closed_price = current_price if current_price is not None else record["entry_price"]
 
         if outcome is not None:
             record["status"] = outcome
             record["closed_at"] = str(datetime.now())
-            record["closed_price"] = current_price
+            record["closed_price"] = closed_price
+            updated_records.append(record)
+        elif record["stop_loss_price"] != stop_before:
             updated_records.append(record)
 
     if updated_records:
@@ -253,7 +296,7 @@ def get_stats(history=None):
     closed = [
         record
         for record in history
-        if record["status"] in ("WIN", "LOSS")
+        if record["status"] in ("WIN", "LOSS", "BREAKEVEN")
     ]
 
     wins = [
@@ -272,7 +315,8 @@ def get_stats(history=None):
         "open": len([r for r in history if r["status"] == "OPEN"]),
         "closed": len(closed),
         "wins": len(wins),
-        "losses": len(closed) - len(wins),
+        "losses": len([r for r in closed if r["status"] == "LOSS"]),
+        "breakevens": len([r for r in closed if r["status"] == "BREAKEVEN"]),
         "expired": len([r for r in history if r["status"] == "EXPIRED"]),
         "win_rate": win_rate
     }

@@ -408,15 +408,187 @@ def breakout_signal_at(data, i, funding_percent=None, params=None):
     }
 
 
-SIGNAL_FUNCTIONS = {"pullback": signal_at, "dip": dip_signal_at, "breakout": breakout_signal_at}
+# ---------------------------------------------------------------------------
+# استراتژی «هم‌گرایی» (Confluence): چند تأیید مستقل تحلیل تکنیکال کلاسیک
+# ---------------------------------------------------------------------------
+#
+# برای بالا بردن نرخ برد، فقط وقتی وارد می‌شویم که چند چیز با هم جور باشند:
+# 1. روند: قیمت و EMA50 بالای EMA200 (Long) — معامله در جهت روند بزرگ‌تر.
+# 2. محل: قیمت روی یک حمایت واقعی برگشته است (کف چرخشی اخیر، EMA50 یا باند
+#    پایین بولینگر) — نه وسط هوا.
+# 3. ماشه: یک الگوی کندلی برگشتی صعودی (پوشا، پین‌بار/چکش، ستاره‌ی صبحگاهی).
+# 4. تأییدها (حداقل min_confirmations تا): واگرایی مثبت RSI، برگشت استوکاستیک از
+#    اشباع فروش، رشد هیستوگرام MACD، حجم بالاتر از معمول، OBV بالای میانگینش.
+# 5. جا برای حرکت: تا مقاومت بعدی دست‌کم به اندازه‌ی هدف (۲R) فاصله باشد.
+# Short دقیقاً برعکس. حد ضرر زیر کف الگو/حمایت.
+
+CONFLUENCE_DEFAULT_PARAMS = {
+    "use_trend_filter": True,
+    "min_confirmations": 2,
+    "require_room": True,
+    "room_r": 2.0,
+    "level_lookback": 120,
+    "near_level_atr": 0.5,
+    "stop_buffer_atr": 0.2,
+    "stop_atr_min": 0.5,
+    "stop_atr_max": 3.0,
+    "volume_ratio": 1.2,
+    "use_funding_filter": True,
+    "funding_crowded_percent": 0.05,
+}
+
+CONFLUENCE_MIN_CANDLES = 220
+
+
+def confluence_signal_at(data, i, funding_percent=None, params=None):
+
+    from src.futures import ta_advanced as ta
+
+    p = {**CONFLUENCE_DEFAULT_PARAMS, **(params or {})}
+
+    if i < CONFLUENCE_MIN_CANDLES - 1:
+        return None
+
+    ta.add_advanced_indicators(data)
+
+    close, atr = data["close"][i], data["atr"][i]
+    ema50, ema200 = data["ema50"][i], data["ema200"][i]
+
+    if not atr or ema50 is None or ema200 is None or data["macd_hist"][i - 1] is None:
+        return None
+
+    pattern_dir, pattern = ta.candle_pattern(data["open"], data["high"], data["low"], data["close"], i)
+
+    if pattern_dir == 0:
+        return None
+
+    up = pattern_dir == 1
+    direction = "LONG" if up else "SHORT"
+
+    if p["use_trend_filter"]:
+        if up and not (close > ema200 and ema50 > ema200):
+            return None
+        if not up and not (close < ema200 and ema50 < ema200):
+            return None
+
+    support, resistance = ta.nearest_levels(
+        data["swing_highs"], data["swing_lows"], i, close, p["level_lookback"]
+    )
+    near = p["near_level_atr"] * atr
+    reasons = [pattern]
+
+    # 2) محل: برگشت از یک سطح
+    if up:
+        touched = []
+        if support is not None and data["low"][i] - near <= support <= close:
+            touched.append(("حمایت کف قبلی", support))
+        if data["low"][i] <= ema50 + 0.25 * atr and close > ema50:
+            touched.append(("EMA50", ema50))
+        if data["bb_lower"][i] is not None and data["low"][i] <= data["bb_lower"][i]:
+            touched.append(("باند پایین بولینگر", data["bb_lower"][i]))
+    else:
+        touched = []
+        if resistance is not None and close <= resistance <= data["high"][i] + near:
+            touched.append(("مقاومت سقف قبلی", resistance))
+        if data["high"][i] >= ema50 - 0.25 * atr and close < ema50:
+            touched.append(("EMA50", ema50))
+        if data["bb_upper"][i] is not None and data["high"][i] >= data["bb_upper"][i]:
+            touched.append(("باند بالای بولینگر", data["bb_upper"][i]))
+
+    if not touched:
+        return None
+
+    reasons += ["برگشت از " + name for name, _ in touched]
+
+    # 4) تأییدها
+    confirmations = []
+    divergence = ta.rsi_divergence(data["swing_highs"], data["swing_lows"], data["rsi"], i)
+    if divergence == pattern_dir:
+        confirmations.append("واگرایی " + ("مثبت" if up else "منفی") + " RSI")
+
+    k_now, d_now = data["stoch_k"][i], data["stoch_d"][i]
+    recent_k = [v for v in data["stoch_k"][i - 3:i + 1] if v is not None]
+    if k_now is not None and d_now is not None and recent_k:
+        if up and min(recent_k) < 25 and k_now > d_now:
+            confirmations.append("برگشت استوکاستیک از اشباع فروش")
+        if not up and max(recent_k) > 75 and k_now < d_now:
+            confirmations.append("برگشت استوکاستیک از اشباع خرید")
+
+    hist_now, hist_prev = data["macd_hist"][i], data["macd_hist"][i - 1]
+    if (up and hist_now > hist_prev) or (not up and hist_now < hist_prev):
+        confirmations.append("هیستوگرام MACD در جهت معامله")
+
+    if data["volume_sma"][i] and data["volume"][i] >= p["volume_ratio"] * data["volume_sma"][i]:
+        confirmations.append("حجم بالاتر از معمول")
+
+    if data["obv_ema"][i] is not None:
+        if (up and data["obv"][i] > data["obv_ema"][i]) or (not up and data["obv"][i] < data["obv_ema"][i]):
+            confirmations.append("OBV هم‌جهت")
+
+    if len(confirmations) < p["min_confirmations"]:
+        return None
+
+    if p["use_funding_filter"] and funding_percent is not None:
+        if up and funding_percent > p["funding_crowded_percent"]:
+            return None
+        if not up and funding_percent < -p["funding_crowded_percent"]:
+            return None
+
+    # حد ضرر: پشت کف/سقف الگو یا سطح، با کمی فاصله
+    if up:
+        anchor = min([data["low"][i], data["low"][i - 1]] + [lvl for _, lvl in touched if lvl < close])
+        distance = close - (anchor - p["stop_buffer_atr"] * atr)
+    else:
+        anchor = max([data["high"][i], data["high"][i - 1]] + [lvl for _, lvl in touched if lvl > close])
+        distance = (anchor + p["stop_buffer_atr"] * atr) - close
+
+    if distance > p["stop_atr_max"] * atr:
+        return None
+    distance = max(distance, p["stop_atr_min"] * atr)
+    stop = close - distance if up else close + distance
+
+    if stop <= 0:
+        return None
+
+    # 5) جا برای حرکت تا مقاومت/حمایت بعدی
+    if p["require_room"]:
+        if up and resistance is not None and resistance - close < p["room_r"] * distance:
+            return None
+        if not up and support is not None and close - support < p["room_r"] * distance:
+            return None
+
+    structure = ta.market_structure(data["swing_highs"], data["swing_lows"], i)
+    strength = 40 + 12 * len(confirmations) + (10 if structure == pattern_dir else 0)
+
+    return {
+        "direction": direction,
+        "entry": close,
+        "stop": stop,
+        "strength": min(100, strength),
+        "adx": round(data["adx"][i], 1) if data["adx"][i] is not None else None,
+        "rsi": round(data["rsi"][i], 1) if data["rsi"][i] is not None else None,
+        "atr_percent": round(atr / close * 100, 3),
+        "trend_4h": data["trend_4h"][i],
+        "reasons": reasons + confirmations,
+        "support": support,
+        "resistance": resistance,
+    }
+
+
+SIGNAL_FUNCTIONS = {
+    "pullback": signal_at, "dip": dip_signal_at, "breakout": breakout_signal_at,
+    "confluence": confluence_signal_at,
+}
 MIN_CANDLES_BY_STRATEGY = {
     "pullback": MIN_CANDLES, "dip": DIP_MIN_CANDLES, "breakout": BREAKOUT_MIN_CANDLES,
+    "confluence": CONFLUENCE_MIN_CANDLES,
 }
 
 STRATEGY_TITLES = {
     "dip": "خرید افت در روند (MA20 + RSI)",
     "pullback": "پولبک در جهت روند (EMA + ADX)",
     "breakout": "شکست سقف/کف در جهت روند (Donchian)",
+    "confluence": "هم‌گرایی تکنیکال (روند + سطح + الگوی کندلی + تأییدها)",
 }
 
 

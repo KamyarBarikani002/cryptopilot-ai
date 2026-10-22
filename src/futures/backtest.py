@@ -19,6 +19,7 @@ import bisect
 from datetime import datetime, timezone
 
 from src.futures import strategy
+from src.futures.exits import simulate_exit
 from src.futures.futures_risk import _loss_per_unit, build_trade_plan
 
 
@@ -29,11 +30,13 @@ STRATEGIES = {
     "v1": strategy.dip_signal_at,
     "v2": strategy.signal_at,
     "breakout": strategy.breakout_signal_at,
+    "confluence": strategy.confluence_signal_at,
 }
 
 _WARMUP = {"dip": strategy.DIP_MIN_CANDLES, "v1": strategy.DIP_MIN_CANDLES,
            "pullback": strategy.MIN_CANDLES, "v2": strategy.MIN_CANDLES,
-           "breakout": strategy.BREAKOUT_MIN_CANDLES}
+           "breakout": strategy.BREAKOUT_MIN_CANDLES,
+           "confluence": strategy.CONFLUENCE_MIN_CANDLES}
 
 
 def _funding_lookup(funding_points):
@@ -63,6 +66,7 @@ def backtest_symbol(
     fee_percent=0.06,
     max_hold=72,
     tick_size=None,
+    breakeven_at_r=None,
 ):
 
     signal_fn = STRATEGIES[strategy_name]
@@ -96,20 +100,17 @@ def backtest_symbol(
         long_ = signal["direction"] == "LONG"
         loss_unit = _loss_per_unit(entry, stop, fee_rate)
 
-        result, exit_price, j = "TIMEOUT", None, i
+        outcome = simulate_exit(
+            signal["direction"], entry, stop, target,
+            data["high"], data["low"], data["close"],
+            i + 1, min(i + 1 + max_hold, n), fee_rate, breakeven_at_r,
+        )
+        j = outcome["exit_index"]
+        exit_price = outcome["exit_price"]
+        result = "TIMEOUT" if outcome["result"] == "OPEN" else outcome["result"]
 
-        for j in range(i + 1, min(i + 1 + max_hold, n)):
-            hit_stop = data["low"][j] <= stop if long_ else data["high"][j] >= stop
-            hit_target = data["high"][j] >= target if long_ else data["low"][j] <= target
-            if hit_stop:
-                result, exit_price = "LOSS", stop
-                break
-            if hit_target:
-                result, exit_price = "WIN", target
-                break
-
-        if exit_price is None:
-            exit_price = data["close"][j]
+        if exit_price is None:   # آخرین کندل داده؛ چیزی بعدش نیست
+            break
 
         move = (exit_price - entry) if long_ else (entry - exit_price)
         r = (move - fee_rate * (entry + exit_price)) / loss_unit
@@ -152,11 +153,13 @@ def summarize(trades):
     total = len(trades)
 
     if total == 0:
-        return {"trades": 0, "wins": 0, "losses": 0, "timeouts": 0, "win_rate": 0.0,
+        return {"trades": 0, "wins": 0, "losses": 0, "breakevens": 0, "timeouts": 0,
+                "win_rate": 0.0, "loss_rate": 0.0,
                 "avg_r": 0.0, "total_r": 0.0, "profit_factor": 0.0, "max_drawdown_r": 0.0}
 
     wins = sum(1 for t in trades if t["result"] == "WIN")
     losses = sum(1 for t in trades if t["result"] == "LOSS")
+    breakevens = sum(1 for t in trades if t["result"] == "BREAKEVEN")
     gross_win = sum(t["r"] for t in trades if t["r"] > 0)
     gross_loss = -sum(t["r"] for t in trades if t["r"] < 0)
 
@@ -172,8 +175,10 @@ def summarize(trades):
         "trades": total,
         "wins": wins,
         "losses": losses,
-        "timeouts": total - wins - losses,
+        "breakevens": breakevens,
+        "timeouts": total - wins - losses - breakevens,
         "win_rate": round(wins / total * 100, 1),
+        "loss_rate": round(losses / total * 100, 1),
         "avg_r": round(total_r / total, 3),
         "total_r": round(total_r, 2),
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss else float("inf"),

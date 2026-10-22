@@ -36,6 +36,55 @@ from src.futures.futures_market_data import (
     get_turnover_24h,
 )
 from src.futures.futures_risk import build_trade_plan
+from src.news.feeds import build_news_context, macro_risk_now
+from src.news.sentiment import normalize_coin
+
+
+NEWS_BLOCK_SCORE = 3   # امتیاز خبری ۲۴ ساعت اخیر که از آن به بعد معامله‌ی خلاف‌جهت بسته می‌شود
+
+
+def base_coin(symbol):
+
+    """XBTUSDTM -> BTC ، SOLUSDTM -> SOL"""
+
+    for suffix in ("USDTM", "USDCM", "USDM"):
+        if symbol.endswith(suffix):
+            return normalize_coin(symbol[: -len(suffix)])
+    return normalize_coin(symbol)
+
+
+def apply_news(opportunity, news, macro_event):
+
+    """
+    اثر خبرها روی یک فرصت:
+    - ارزی که کوکوین اعلام حذفش را داده: مسدود
+    - خبر اقتصادی مهم آمریکا در ۲ ساعت آینده یا ۱ ساعت گذشته: مسدود
+    - خبرهای خیلی منفی (برای Long) یا خیلی مثبت (برای Short) در ۲۴ ساعت اخیر: مسدود
+    - خبرهای کمتر شدید: اطمینان را کمی بالا/پایین می‌برند
+    """
+
+    coin = base_coin(opportunity["symbol"])
+    sign = 1 if opportunity["direction"] == "LONG" else -1
+    score = news.get("coin_scores", {}).get(coin, 0)
+
+    opportunity["news_score"] = score
+    opportunity["blocked_reason"] = None
+
+    if coin in news.get("delisted_coins", set()):
+        opportunity["blocked_reason"] = "کوکوین حذف این ارز را اعلام کرده"
+    elif macro_event is not None:
+        opportunity["blocked_reason"] = (
+            "خبر مهم اقتصادی آمریکا: " + macro_event["title"] + " ("
+            + macro_event["time"].strftime("%H:%M UTC") + ")"
+        )
+    elif score * sign <= -NEWS_BLOCK_SCORE:
+        opportunity["blocked_reason"] = "خبرهای " + ("منفی" if sign == 1 else "مثبت") + " ۲۴ ساعت اخیر این ارز"
+
+    adjustment = max(-10, min(10, 3 * score * sign))
+    opportunity["confidence"] = max(0, min(100, opportunity["confidence"] + adjustment))
+    opportunity["score"] = opportunity["confidence"] * sign
+
+    return opportunity
 
 
 SCAN_WORKERS = 8
@@ -129,6 +178,7 @@ def scan_symbol(
         "rsi": signal["rsi"],
         "adx": signal["adx"],
         "volatility_percent": signal["atr_percent"],
+        "reasons": signal.get("reasons", []),
     }
     opportunity.update(plan)
     opportunity["turnover_24h"] = _safe(turnover_fetcher, symbol, 0.0)
@@ -147,6 +197,7 @@ def scan_market(
     tick_size_fetcher=get_tick_size,
     risk_percent=None,
     turnover_fetcher=get_turnover_24h,
+    news_fetcher=build_news_context,
 ):
     """
     همه‌ی fetcher ها قابل تزریق‌اند تا تست و حالت آزمایشی بدون اتصال به کوکوین
@@ -180,13 +231,28 @@ def scan_market(
     opportunities = [o for o, _ in outcomes if o is not None]
     skipped = [e for _, e in outcomes if e is not None]
 
-    longs = sorted([o for o in opportunities if o["direction"] == "LONG"], key=lambda o: o["confidence"], reverse=True)
-    shorts = sorted([o for o in opportunities if o["direction"] == "SHORT"], key=lambda o: o["confidence"], reverse=True)
+    try:
+        news = news_fetcher()
+    except Exception:
+        news = {}
+    macro_event = macro_risk_now(news) if news else None
+
+    for opportunity in opportunities:
+        apply_news(opportunity, news, macro_event)
+
+    tradable = [o for o in opportunities if not o["blocked_reason"]]
+    blocked = [o for o in opportunities if o["blocked_reason"]]
+
+    longs = sorted([o for o in tradable if o["direction"] == "LONG"], key=lambda o: o["confidence"], reverse=True)
+    shorts = sorted([o for o in tradable if o["direction"] == "SHORT"], key=lambda o: o["confidence"], reverse=True)
 
     return {
         "scanned": len(symbols),
         "longs": longs,
         "shorts": shorts,
+        "blocked": blocked,
+        "macro_event": macro_event,
+        "news_errors": news.get("errors", []) if news else ["منابع خبری در دسترس نبودند"],
         "skipped": skipped,
         "fear_greed_index": fear_greed_value,
     }

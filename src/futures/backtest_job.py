@@ -45,7 +45,28 @@ RESEARCH_VARIANTS = [
     ("پولبک در جهت روند، نسبت ۱ به ۳", "pullback", {}, 3.0),
 ]
 
-VARIANT_SETS = {"quick": QUICK_VARIANTS, "research": RESEARCH_VARIANTS}
+# هدف: نرخ برد بالاتر. ردیف پنجم (اختیاری) = انتقال حد ضرر به نقطه‌ی ورود بعد از چند R
+BE = 1.0
+WINRATE_VARIANTS = [
+    ("خرید افت (فعلی)", "dip", {}, 2.0),
+    ("خرید افت + سر‌به‌سر بعد از ۱R", "dip", {}, 2.0, BE),
+    ("هم‌گرایی تکنیکال (الگو + سطح + ۲ تأیید)", "confluence", {}, 2.0),
+    ("هم‌گرایی + سر‌به‌سر", "confluence", {}, 2.0, BE),
+    ("هم‌گرایی سخت‌گیرانه (۳ تأیید) + سر‌به‌سر", "confluence", {"min_confirmations": 3}, 2.0, BE),
+    ("هم‌گرایی بدون شرط فضا تا مقاومت + سر‌به‌سر", "confluence", {"require_room": False}, 2.0, BE),
+    ("هم‌گرایی بدون فیلتر روند + سر‌به‌سر", "confluence", {"use_trend_filter": False}, 2.0, BE),
+    ("پولبک در جهت روند + سر‌به‌سر", "pullback", {}, 2.0, BE),
+    ("شکست ۴۸ کندلی، نسبت ۱ به ۳ + سر‌به‌سر", "breakout", {}, 3.0, BE),
+]
+
+VARIANT_SETS = {"quick": QUICK_VARIANTS, "research": RESEARCH_VARIANTS, "winrate": WINRATE_VARIANTS}
+INTERVAL_HOURS = {"1h": 1, "4h": 4}
+
+
+def unpack_variant(variant):
+    """(label, name, params, rr, breakeven_at_r یا None)"""
+    label, name, params, rr, *rest = variant
+    return label, name, params, rr, (rest[0] if rest else None)
 STRATEGY_VARIANTS = QUICK_VARIANTS   # نام قدیمی، برای سازگاری
 
 
@@ -98,11 +119,12 @@ class BacktestJob:
         فشرده (numpy) نگه داشته می‌شوند و فقط موقع بک‌تست به لیست تبدیل می‌شوند.
         """
 
-        key = (symbol, start_ms, end_ms, s["use_funding"])
+        interval = s.get("interval", "1h")
+        key = (symbol, interval, start_ms, end_ms, s["use_funding"])
         problems = []
 
         if key not in self._history_cache:
-            candles = f["klines"](symbol, "1h", start_ms, end_ms)
+            candles = f["klines"](symbol, interval, start_ms, end_ms)
             funding = []
             if s["use_funding"]:
                 try:
@@ -116,13 +138,16 @@ class BacktestJob:
     def _compute(self, s, f):
 
         started = time.time()
-        end_ms = int(started // 3600 * 3600 * 1000)
-        start_ms = end_ms - (s["days"] * 24 + WARMUP_CANDLES) * HOUR_MS
+        hours = INTERVAL_HOURS[s.get("interval", "1h")]
+        step_ms = hours * HOUR_MS
+        end_ms = int(started // (3600 * hours) * (3600 * hours) * 1000)
+        start_ms = end_ms - (s["days"] * 24 // hours + WARMUP_CANDLES) * step_ms
+        hold_candles = max(3, s["max_hold"] // hours)
 
-        variants = VARIANT_SETS[s.get("variant_set", "quick")]
+        variants = [unpack_variant(v) for v in VARIANT_SETS[s.get("variant_set", "quick")]]
         symbols = f["symbols"](s["top_n"])
         failed, timings = [], {}
-        results = {label: [] for label, _, _, _ in variants}
+        results = {v[0]: [] for v in variants}
         done = 0
 
         def work(symbol):
@@ -134,9 +159,9 @@ class BacktestJob:
                     symbol, rows, name, params,
                     funding_points=funding,
                     min_reward_risk=max(rr, REWARD_RISK_RATIO), fee_percent=FUTURES_TAKER_FEE_PERCENT,
-                    max_hold=s["max_hold"], tick_size=tick,
+                    max_hold=hold_candles, tick_size=tick, breakeven_at_r=be,
                 )
-                for label, name, params, rr in variants
+                for label, name, params, rr, be in variants
             } if len(rows) else {}
             return per_variant, problems, round(time.time() - t0, 1)
 
@@ -159,7 +184,7 @@ class BacktestJob:
                     message=str(done) + " از " + str(len(symbols)) + " ارز — آخرین: " + symbol,
                 )
 
-        results = [(label, results[label]) for label, _, _, _ in variants]
+        results = [(v[0], results[v[0]]) for v in variants]
         loaded = [sym for sym in symbols if sym in timings]
 
         return {
